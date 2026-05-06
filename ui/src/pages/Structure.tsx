@@ -168,6 +168,11 @@ export default function Structure() {
     emptyOverlayState()
   );
   const [overlayError, setOverlayError] = useState<string | null>(null);
+  // Tracks whether the initial /v1/structure/recent fetch has completed.
+  // While in-flight we suppress the SAMPLE_* fallback graph so the user
+  // doesn't see a placeholder count (e.g., ~47) flash before the real
+  // tenant graph (e.g., 141 for Pelago) loads.
+  const [initialFetchPending, setInitialFetchPending] = useState(true);
 
   // On mount, pull every active commitment for the tenant so the
   // graph reflects the loaded snapshot, not the SAMPLE_* placeholder
@@ -199,6 +204,7 @@ export default function Structure() {
         // be loud.
       } finally {
         firstFetchDone = true;
+        if (initial && alive) setInitialFetchPending(false);
       }
     }
     void fetchStructure(true);
@@ -279,17 +285,21 @@ export default function Structure() {
     return overlayState.people.map(adaptOverlayPerson);
   }, [overlayState.people]);
 
-  // When overlay has any data, the graph reflects the real tenant —
-  // SAMPLE_* is the no-API fallback for the static dev mode only.
+  // When overlay has any data, the graph reflects the real tenant.
+  // SAMPLE_* is the no-API fallback for the static dev mode only —
+  // and we suppress it while the initial fetch is still pending so
+  // the user never sees a placeholder count flash before the real
+  // tenant graph lands.
   const hasOverlayData =
     overlayCommitments.length > 0 ||
     overlayState.goals.length > 0 ||
     overlayState.people.length > 0 ||
     overlayState.customers.length > 0 ||
     overlayState.decisions.length > 0;
+  const useApiData = hasOverlayData || initialFetchPending;
 
   const allDecisions = useMemo(() => {
-    if (hasOverlayData) {
+    if (useApiData) {
       return overlayState.decisions.map((d) => ({
         id: d.id,
         label: d.label,
@@ -297,43 +307,43 @@ export default function Structure() {
       }));
     }
     return SAMPLE_DECISIONS;
-  }, [hasOverlayData, overlayState.decisions]);
+  }, [useApiData, overlayState.decisions]);
 
   const allCommitments = useMemo(() => {
-    if (hasOverlayData) return overlayCommitments;
+    if (useApiData) return overlayCommitments;
     return SAMPLE_COMMITMENTS;
-  }, [hasOverlayData, overlayCommitments]);
+  }, [useApiData, overlayCommitments]);
 
   const allGoals = useMemo(() => {
-    if (hasOverlayData) return overlayState.goals;
+    if (useApiData) return overlayState.goals;
     return SAMPLE_GOALS;
-  }, [hasOverlayData, overlayState.goals]);
+  }, [useApiData, overlayState.goals]);
 
   const allPeople = useMemo(() => {
-    if (hasOverlayData) return overlayPeople;
+    if (useApiData) return overlayPeople;
     return SAMPLE_PEOPLE;
-  }, [hasOverlayData, overlayPeople]);
+  }, [useApiData, overlayPeople]);
 
   const allOwners = useMemo(() => {
-    if (hasOverlayData) {
+    if (useApiData) {
       return overlayState.people.map((p) => ({ id: p.id, label: p.label }));
     }
     return SAMPLE_OWNERS;
-  }, [hasOverlayData, overlayState.people]);
+  }, [useApiData, overlayState.people]);
 
   const allCustomers = useMemo(() => {
-    if (hasOverlayData) return overlayState.customers;
+    if (useApiData) return overlayState.customers;
     return SAMPLE_CUSTOMERS;
-  }, [hasOverlayData, overlayState.customers]);
+  }, [useApiData, overlayState.customers]);
 
   const allPeopleIndex = useMemo(() => {
-    if (hasOverlayData) {
+    if (useApiData) {
       const idx: Record<string, PersonProfile> = {};
       for (const p of overlayPeople) idx[p.id] = p;
       return idx;
     }
     return SAMPLE_PEOPLE_INDEX;
-  }, [hasOverlayData, overlayPeople]);
+  }, [useApiData, overlayPeople]);
 
   const newestOverlayCommitment = overlayCommitments[0];
 
