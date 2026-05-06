@@ -3485,6 +3485,12 @@ a { color: inherit; text-decoration: none; }
   font-size: 11px;
   fill: var(--high);
 }
+.rg-agg-overflow {
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 500;
+  fill: var(--ink-3);
+}
 
 /* Back-to-overview button (focus mode) */
 .rg-back {

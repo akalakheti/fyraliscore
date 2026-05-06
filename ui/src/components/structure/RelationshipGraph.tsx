@@ -1514,10 +1514,17 @@ function quadrantArcs(
 
 function corners(cx: number, cy: number, r: number, count: number) {
   if (count === 0) return [];
+  // Four diagonal anchors. When more than 4 related items exist, push
+  // the overflow onto progressively-larger concentric rings rather
+  // than nudging by 0.18rad which causes chip overlap (chord step at
+  // r=240 is only ~43px vs chip width 168).
   const angles = [-Math.PI / 4, -3 * Math.PI / 4, Math.PI / 4, 3 * Math.PI / 4];
+  const ringStep = 90;
   return Array.from({ length: count }, (_, i) => {
-    const a = angles[i % angles.length] + Math.floor(i / angles.length) * 0.18;
-    return { x2: cx + Math.cos(a) * r, y2: cy + Math.sin(a) * r };
+    const ringIdx = Math.floor(i / angles.length);
+    const a = angles[i % angles.length];
+    const ringR = r + ringIdx * ringStep;
+    return { x2: cx + Math.cos(a) * ringR, y2: cy + Math.sin(a) * ringR };
   });
 }
 
@@ -1547,8 +1554,14 @@ function AggregateGraph({
 
   const cx = w / 2;
   const cy = h / 2;
-  const innerR = Math.min(w, h) * 0.18;
-  const outerR = Math.min(w, h) * 0.36;
+  // Goal nodes on two rings; outer ring pulled out enough that a busy
+  // goal's leaf orbit on either ring can't bleed into the other.
+  const innerR = Math.min(w, h) * 0.20;
+  const outerR = Math.min(w, h) * 0.46;
+  // Cap leaves shown around each goal so high-count goals don't grow
+  // their orbit past adjacent goals; remaining count surfaces as a
+  // "+N more" indicator.
+  const MAX_VISIBLE_LEAVES = 24;
 
   const strat = goals.filter((g) => g.altitude === "strategic");
   const op = goals.filter((g) => g.altitude === "operational");
@@ -1592,13 +1605,23 @@ function AggregateGraph({
         const sorted = [...list].sort(
           (a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9)
         );
-        // Multi-ring leaves so dots never collide. Capacity per ring
-        // scales with circumference; a wider base keeps leaves clear of
-        // the goal-node label below the circle.
-        const leafPos = orbitPositions(center.x, center.y, sorted.length);
+        // Cap visible leaves so a high-traffic goal's orbit can't grow
+        // past adjacent goals on the other ring.
+        const overflow = Math.max(0, sorted.length - MAX_VISIBLE_LEAVES);
+        const visible = overflow > 0
+          ? sorted.slice(0, MAX_VISIBLE_LEAVES)
+          : sorted;
+        // Multi-ring leaves so dots never collide; baseR offsets from
+        // the goal's own radius so leaves never cross into the goal
+        // circle.
+        const goalCnt = counts.get(gid) ?? 0;
+        const goalR = 14 + Math.min(28, goalCnt * 1.6);
+        const leafPos = orbitPositions(
+          center.x, center.y, visible.length, goalR,
+        );
         return (
           <g key={"agg-" + gid}>
-            {sorted.map((c, i) => (
+            {visible.map((c, i) => (
               <line
                 key={"el-" + c.id}
                 className={"rg-agg-edge s-" + c.status}
@@ -1608,7 +1631,7 @@ function AggregateGraph({
                 y2={leafPos[i].y}
               />
             ))}
-            {sorted.map((c, i) => (
+            {visible.map((c, i) => (
               <circle
                 key={"ll-" + c.id}
                 className={"rg-agg-leaf s-" + c.status}
@@ -1622,6 +1645,16 @@ function AggregateGraph({
                 </title>
               </circle>
             ))}
+            {overflow > 0 ? (
+              <text
+                x={center.x}
+                y={center.y - goalR - 14}
+                textAnchor="middle"
+                className="rg-agg-overflow"
+              >
+                +{overflow} more
+              </text>
+            ) : null}
           </g>
         );
       })}
@@ -1676,19 +1709,26 @@ function ringPositions(
 }
 
 // Multi-ring orbit for the aggregate-graph leaves around each goal.
-// Leaves are tiny circles (r ≈ 4) so each ring can carry 8-12; we open
+// Leaves are tiny circles (r ≈ 4) so each ring can carry many; we open
 // a second ring once the first fills, keeping leaves from stacking and
 // avoiding overlap with the goal-node label that sits just below.
+//
+// goalRadius is the parent goal's circle radius — we offset baseR
+// from the goal's edge so leaves never cross into the goal circle.
 function orbitPositions(
   cx: number,
   cy: number,
-  count: number
+  count: number,
+  goalRadius: number = 0
 ): { x: number; y: number }[] {
   if (count === 0) return [];
   const out: { x: number; y: number }[] = [];
-  const baseR = 32;
+  // Start one full leaf-diameter clear of the goal's outer edge so
+  // leaves never visually overlap the goal circle even when the goal
+  // grows large with high commitment counts.
+  const baseR = Math.max(34, goalRadius + 12);
   const ringStep = 14;
-  const perRing = 9;
+  const perRing = 12;
   let placed = 0;
   let ringIdx = 0;
   while (placed < count) {
