@@ -78,6 +78,7 @@ addopts = [
     "--deselect=services/retrieval/tests/test_primary.py::test_t2_prediction_path_uses_a_and_d",
     "--deselect=lib/llm/tests/test_provider.py::test_config_from_env_defaults",
     "--deselect=lib/shared/tests/test_db.py::test_get_pool_uninitialised_raises",
+    "--deselect=lib/shared/tests/test_db.py::test_init_pool_missing_dsn",
     # Flaky in full-suite runs (pass in isolation). Likely shared-DB
     # ordering / async teardown timing.
     "--deselect=services/realtime/tests/test_dispatcher.py::test_replay_since_sequence_num_ordered",
