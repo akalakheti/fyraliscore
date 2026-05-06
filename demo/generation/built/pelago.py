@@ -38,6 +38,8 @@ from demo.generation.schemas import (
     GeneratedGoal,
     GeneratedModel,
     GeneratedRecommendation,
+    GeneratedResource,
+    GeneratedResourceDeployment,
     GeneratedSignal,
     TargetActRef,
 )
@@ -443,6 +445,313 @@ def _rate_generated_commitments_from_gt(
 
 
 # =====================================================================
+# Resources — capacity pools (human pods, financial, technical platforms)
+# =====================================================================
+#
+# Why Pelago has these particular resources:
+#
+# - Human pods are the unit at which the company actually thinks about
+#   capacity. Engineering is the famously over-stretched pod (Salesforce
+#   sync fires, VP-Eng departure m5); Data & ML carries the Snowflake
+#   migration + forecast model + conv-AI; Sales/CS run the customer
+#   surface; Founder & exec is a thin pool that gets eaten by 1:1s and
+#   board prep. Mapping commitments → pod via owner role_family lets
+#   the aggregate view show "where the work lives" at a glance.
+#
+# - Financial pools are the long-horizon constraints any Series-A CEO
+#   tracks: cash runway is the existential clock; GTM budget is the
+#   ARR-growth lever. Linking commits to either pool surfaces "what
+#   strategic spend is each motion drawing on?".
+#
+# - Technical platforms are infrastructure surfaces that have real
+#   maintenance load. Salesforce-sync + Production-API platforms
+#   compete for the same backend engineers. Snowflake is the warehouse
+#   that the entire data org standardizes on. ML training compute is
+#   the single pool feeding all model work; if it's underutilized the
+#   conv-AI roadmap can absorb it without a procurement cycle.
+#
+# Capacity values are tuned so the aggregate view shows the spec's
+# narrative tensions: engineering near 100%, ML compute under-allocated,
+# Salesforce sync platform constrained.
+
+_POD_BY_ROLE_FAMILY = {
+    "engineering":      "pod-engineering",
+    "data_ml":          "pod-data-ml",
+    "sales":            "pod-sales",
+    "customer_success": "pod-cs",
+    "product":          "pod-product-design",
+    "design":           "pod-product-design",
+    "exec":             "pod-exec",
+    "founder":          "pod-exec",
+    "marketing":        "pod-ops",
+    "finance":          "pod-ops",
+    "people":           "pod-ops",
+}
+
+# Tech-resource keyword routes: any commitment whose title or owner
+# role implicates one of these areas pulls from the corresponding
+# infrastructure pool. Each match attaches a small unit-quantity
+# deployment alongside the human-pod deployment so the same commit
+# shows up on both surfaces in the resource view.
+_TECH_KEYWORD_ROUTES = [
+    # (resource_identity, [keywords], unit_per_commit)
+    ("infra-salesforce-sync",
+     ["salesforce", "sync", "connector", "crm", "hubspot", "pipedrive"], 1.0),
+    ("infra-snowflake",
+     ["snowflake", "warehouse", "bigquery", "dbt", "schema", "ingestion"], 60.0),
+    ("infra-ml-compute",
+     ["forecast", "conv-ai", "conversation-ai", "icp", "ml ", "ml-", "training", "model", "scoring"], 30.0),
+    ("infra-api-platform",
+     ["api", "rate", "webhook", "auth", "queue", "worker", "idempotency", "service"], 0.8),
+]
+
+
+def _capacity_resources_for_pelago() -> list[GeneratedResource]:
+    """The 13-resource capacity surface for Pelago: 6 human pods,
+    2 financial pools, 4 technical platforms, 1 founder bandwidth."""
+    return [
+        # ---- Human pods --------------------------------------------------
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-engineering"),
+            kind="human", identity="pod:engineering",
+            label="Engineering pod",
+            description="Backend + frontend engineering capacity. Owns Salesforce sync, API platform, and dashboard surface.",
+            capacity=7.0, unit="FTE",
+            utilization_state="constrained",
+            metadata={"category": "human_pod", "members": ["maya", "wei", "marcus", "elena", "sam", "yuki", "aisha"]},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-data-ml"),
+            kind="human", identity="pod:data_ml",
+            label="Data & ML pod",
+            description="Data engineering + ML engineering capacity. Owns Snowflake, forecast model, conv-AI, ICP scoring.",
+            capacity=6.0, unit="FTE",
+            utilization_state="deployed",
+            metadata={"category": "human_pod", "members": ["nikita", "hannah", "dimitri", "felix", "naomi", "ravi"]},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-sales"),
+            kind="human", identity="pod:sales",
+            label="Sales pod (AE + SE)",
+            description="Account executives and sales engineers. Pipeline coverage, deal cycles, technical demos.",
+            capacity=6.0, unit="FTE",
+            utilization_state="deployed",
+            metadata={"category": "human_pod", "members": ["liam", "sophie", "marco", "tess", "jordan", "adrienne"]},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-cs"),
+            kind="human", identity="pod:customer_success",
+            label="Customer Success pod",
+            description="CS managers and implementation engineers. Onboarding, renewals, save-plays.",
+            capacity=5.0, unit="FTE",
+            utilization_state="constrained",
+            metadata={"category": "human_pod", "members": ["eve", "adam", "robin", "carlos", "hema"]},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-product-design"),
+            kind="human", identity="pod:product_design",
+            label="Product & Design pod",
+            description="Two PMs and the sole designer. Roadmap stewardship, dashboard v2, onboarding flows.",
+            capacity=3.0, unit="FTE",
+            utilization_state="deployed",
+            metadata={"category": "human_pod", "members": ["caleb", "brielle", "theo"]},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-exec"),
+            kind="human", identity="pod:exec",
+            label="Founder & exec pool",
+            description="Diana (CEO), Sanjay (CTO), Tom (VP Eng), Owen (VP Sales), Priya (Head of CS).",
+            capacity=5.0, unit="FTE",
+            utilization_state="constrained",
+            metadata={"category": "human_pod", "members": ["diana", "sanjay", "tom", "owen", "priya"]},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "pod-ops"),
+            kind="human", identity="pod:ops_marketing_finance",
+            label="Ops, Marketing & Finance",
+            description="Solo functions: marketing (Quinn), finance (Beatriz), recruiting (Olu).",
+            capacity=3.0, unit="FTE",
+            utilization_state="deployed",
+            metadata={"category": "human_pod", "members": ["quinn", "beatriz", "olu"]},
+        ),
+        # ---- Financial pools --------------------------------------------
+        GeneratedResource(
+            id=did(COMPANY, "resource", "cash-runway"),
+            kind="financial", identity="cash:runway",
+            label="Cash runway",
+            description="Capital available post-Series A close ($14M). Burn-rate scaled monthly.",
+            capacity=14_000_000.0, unit="USD",
+            utilization_state="deployed",
+            controllability="owned",
+            temporal_character="time_limited",
+            metadata={"category": "capital", "monthly_burn_target": 740_000},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "gtm-budget"),
+            kind="financial", identity="cash:gtm_budget",
+            label="GTM budget (annual)",
+            description="Sales + marketing programmatic spend (events, demand-gen, AE ramp, partnerships).",
+            capacity=2_400_000.0, unit="USD",
+            utilization_state="deployed",
+            controllability="owned",
+            temporal_character="time_limited",
+            metadata={"category": "capital", "fiscal_year": "2026"},
+        ),
+        # ---- Technical platforms ----------------------------------------
+        GeneratedResource(
+            id=did(COMPANY, "resource", "infra-salesforce-sync"),
+            kind="technical", identity="infra:salesforce_sync",
+            label="Salesforce sync platform",
+            description="The CRM ingestion surface. Maintenance + anchor-customer fires draw heavily on this pool.",
+            capacity=10.0, unit="engineer-weeks/quarter",
+            utilization_state="constrained",
+            metadata={"category": "platform", "owner_pod": "pod-engineering"},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "infra-snowflake"),
+            kind="technical", identity="infra:snowflake_warehouse",
+            label="Snowflake warehouse",
+            description="Per-tenant warehouse. Forecast inputs, BigQuery cutover, dbt pipeline.",
+            capacity=1500.0, unit="credits/month",
+            utilization_state="deployed",
+            metadata={"category": "platform", "owner_pod": "pod-data-ml"},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "infra-ml-compute"),
+            kind="technical", identity="infra:ml_compute",
+            label="ML training compute",
+            description="GPU pool feeding forecast model retraining, conv-AI experiments, ICP scoring research.",
+            capacity=600.0, unit="GPU-hours/month",
+            utilization_state="available",
+            metadata={"category": "platform", "owner_pod": "pod-data-ml"},
+        ),
+        GeneratedResource(
+            id=did(COMPANY, "resource", "infra-api-platform"),
+            kind="technical", identity="infra:api_platform",
+            label="Production API platform",
+            description="Customer-facing API surface — auth, rate limiting, webhook dispatch, idempotency.",
+            capacity=8.0, unit="engineer-weeks/quarter",
+            utilization_state="deployed",
+            metadata={"category": "platform", "owner_pod": "pod-engineering"},
+        ),
+    ]
+
+
+def _deployment_quantity_for_state(state: str, on_pod: bool) -> float:
+    """How much of a pod's FTE pool a single commitment claims, by state.
+
+    Tuned so a typical 130-commit corpus distributes across pods at
+    realistic utilization levels (engineering near 100%, founder/exec
+    over 100%, others 70-85%)."""
+    if state == "active":
+        return 0.30 if on_pod else 0.0
+    if state == "at_risk":
+        return 0.45 if on_pod else 0.0
+    if state == "blocked":
+        return 0.25 if on_pod else 0.0
+    if state == "done":
+        return 0.05 if on_pod else 0.0
+    return 0.0
+
+
+def _resource_deployments_for_pelago(
+    commitments: list[GeneratedCommitment],
+    actors: list[GeneratedActor],
+    sim_dict: dict[str, Any],
+    customers: list[GeneratedCustomer],
+) -> list[GeneratedResourceDeployment]:
+    """Materialize the commitment → resource bridge.
+
+    Each commitment claims a slice of:
+    - its owner's pod (always)
+    - Customer Success pod (if it serves a customer and the owner isn't
+      already in CS — these are the cross-pod handoff hours)
+    - one or more technical platforms (if title/owner role implicates
+      it via _TECH_KEYWORD_ROUTES)
+    - a per-commitment dollar pull on the relevant financial pool
+      (cash runway for any active commit; GTM budget for sales-led work)
+    """
+    role_family_by_actor = {
+        ap["actor_id"]: ap.get("role_family", "engineering")
+        for ap in sim_dict.get("actor_profiles", [])
+    }
+    role_by_actor = {
+        ap["actor_id"]: ap.get("role", "engineer")
+        for ap in sim_dict.get("actor_profiles", [])
+    }
+    actor_uuid_to_sim_id = {
+        did(COMPANY, "actor", ap["actor_id"]): ap["actor_id"]
+        for ap in sim_dict.get("actor_profiles", [])
+    }
+    customer_uuid_set = {c.id for c in customers}
+
+    deployments: list[GeneratedResourceDeployment] = []
+
+    for c in commitments:
+        sim_actor_id = actor_uuid_to_sim_id.get(c.owner_id)
+        if not sim_actor_id:
+            continue
+        role_family = role_family_by_actor.get(sim_actor_id, "engineering")
+        role = role_by_actor.get(sim_actor_id, "engineer")
+        pod_key = _POD_BY_ROLE_FAMILY.get(role_family, "pod-engineering")
+        pod_resource_id = did(COMPANY, "resource", pod_key)
+
+        pod_qty = _deployment_quantity_for_state(c.state, on_pod=True)
+        if pod_qty > 0:
+            deployments.append(GeneratedResourceDeployment(
+                resource_id=pod_resource_id,
+                commitment_id=c.id,
+                deployed_quantity=pod_qty,
+            ))
+
+        # Cross-pod CS handoff for customer-bearing commits where the
+        # owner isn't already on the CS pod.
+        if c.served_by_customer_id and c.served_by_customer_id in customer_uuid_set:
+            if pod_key != "pod-cs" and c.state in ("active", "at_risk", "blocked"):
+                deployments.append(GeneratedResourceDeployment(
+                    resource_id=did(COMPANY, "resource", "pod-cs"),
+                    commitment_id=c.id,
+                    deployed_quantity=0.10,
+                ))
+
+        # Technical platform routes by title keyword. A single commit can
+        # consume up to 2 platforms if multiple keywords match (e.g.,
+        # "Snowflake migration shard" → snowflake; "API rate-limit" → api).
+        title_lc = (c.title or "").lower()
+        matched_tech = 0
+        for resource_key, keywords, unit_per_commit in _TECH_KEYWORD_ROUTES:
+            if matched_tech >= 2:
+                break
+            if any(k in title_lc for k in keywords):
+                # Scale by state — done/closed only contribute residual load.
+                scale = 1.0 if c.state in ("active", "at_risk") else 0.4
+                deployments.append(GeneratedResourceDeployment(
+                    resource_id=did(COMPANY, "resource", resource_key),
+                    commitment_id=c.id,
+                    deployed_quantity=unit_per_commit * scale,
+                ))
+                matched_tech += 1
+
+        # Financial pool: every active commit pulls a sliver of cash
+        # runway (proxied by per-commit burn share). Sales-led work
+        # additionally pulls GTM budget.
+        if c.state in ("active", "at_risk", "blocked"):
+            deployments.append(GeneratedResourceDeployment(
+                resource_id=did(COMPANY, "resource", "cash-runway"),
+                commitment_id=c.id,
+                deployed_quantity=22_000.0,    # ~$22k of ARR-supporting burn per active commit
+            ))
+            if role_family == "sales" or role == "vp_sales":
+                deployments.append(GeneratedResourceDeployment(
+                    resource_id=did(COMPANY, "resource", "gtm-budget"),
+                    commitment_id=c.id,
+                    deployed_quantity=14_000.0,
+                ))
+
+    return deployments
+
+
+# =====================================================================
 # Signals — sample from the corpus shards
 # =====================================================================
 
@@ -787,6 +1096,14 @@ def build_bundle() -> tuple[GeneratedBundle, dict[str, Any]]:
         actors, customers, commitments, goals, decisions, signals,
     )
 
+    # Capacity resources + commitment → resource deployments. The 13
+    # capacity resources are static for Pelago; deployments are derived
+    # from each commitment's owner role_family + title keywords.
+    resources = _capacity_resources_for_pelago()
+    resource_deployments = _resource_deployments_for_pelago(
+        commitments, actors, sim_dict, customers,
+    )
+
     bundle = GeneratedBundle(
         company_id=COMPANY,
         ceo_actor_id=did(COMPANY, "actor", sim_dict["company_metadata"]["ceo_actor_id"]),
@@ -798,6 +1115,8 @@ def build_bundle() -> tuple[GeneratedBundle, dict[str, Any]]:
         signals=signals,
         models=models,
         recommendations=recommendations,
+        resources=resources,
+        resource_deployments=resource_deployments,
     )
     # Pull validator-target counts from the extras for validate_bundle.
     spec_for_validation = {
@@ -832,6 +1151,8 @@ def main() -> int:
     print(f"  signals:          {len(bundle.signals)}")
     print(f"  models:           {len(bundle.models)}")
     print(f"  recommendations:  {len(bundle.recommendations)}")
+    print(f"  resources:        {len(bundle.resources)}")
+    print(f"  deployments:      {len(bundle.resource_deployments)}")
 
     print("Validating...")
     errors = validate_bundle(bundle, spec=spec_for_validation)

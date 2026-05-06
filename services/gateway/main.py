@@ -1346,6 +1346,7 @@ def _register_routes(app: FastAPI) -> None:
             people_by_id: dict[str, dict[str, Any]] = {}
             customers_by_id: dict[str, dict[str, Any]] = {}
             decisions_by_id: dict[str, dict[str, Any]] = {}
+            resources_by_id: dict[str, dict[str, Any]] = {}
 
             for r in rows:
                 cid = r["id"]
@@ -1363,6 +1364,18 @@ def _register_routes(app: FastAPI) -> None:
                     customers_by_id.setdefault(c["id"], c)
                 for d in bundle.get("decisions", []):
                     decisions_by_id.setdefault(d["id"], d)
+                for rs in bundle.get("resources", []):
+                    # Strip the per-commitment deployed_quantity here
+                    # since the global list represents the resource
+                    # itself, not its slice on any one commitment.
+                    rid = rs["id"]
+                    if rid not in resources_by_id:
+                        resources_by_id[rid] = {
+                            "id": rid,
+                            "label": rs["label"],
+                            "kind": rs["kind"],
+                            "unit": rs.get("unit"),
+                        }
 
             # Always include the tenant's full active human roster so
             # the Structure Team section reflects real DB actors, not
@@ -1403,6 +1416,268 @@ def _register_routes(app: FastAPI) -> None:
                 "people": list(people_by_id.values()),
                 "customers": list(customers_by_id.values()),
                 "decisions": list(decisions_by_id.values()),
+                "resources": list(resources_by_id.values()),
+            },
+            status_code=200,
+        )
+
+    # ---------------- /v1/structure/resources/aggregate ----------
+    # Returns the full capacity-resource portfolio for the tenant with
+    # derived utilization metrics. Drives the Resources view in
+    # Structure.tsx — overall utilization, top consumers per resource,
+    # underutilized vs over-allocated callouts.
+    @app.get("/v1/structure/resources/aggregate")
+    async def structure_resources_aggregate(
+        request: Request,
+    ) -> JSONResponse:
+        auth: AuthContext | None = getattr(request.state, "auth", None)
+        if auth is None:  # pragma: no cover
+            return _unauth("missing_bearer")
+
+        deps = _deps(request)
+        async with deps.pool.acquire() as conn:
+            res_rows = await conn.fetch(
+                "SELECT id, kind, identity, description, current_value, "
+                "       utilization_state, controllability, metadata "
+                "FROM resources "
+                "WHERE tenant_id = $1 "
+                "  AND archived_at IS NULL "
+                "  AND kind IN ('human', 'financial', 'technical', 'time') "
+                "ORDER BY kind, identity",
+                auth.tenant_id,
+            )
+
+            resources_payload: list[dict[str, Any]] = []
+            for r in res_rows:
+                cv = r["current_value"]
+                if isinstance(cv, str):
+                    try:
+                        cv = json.loads(cv)
+                    except json.JSONDecodeError:
+                        cv = {}
+                if not isinstance(cv, dict):
+                    cv = {}
+                md = r["metadata"]
+                if isinstance(md, str):
+                    try:
+                        md = json.loads(md)
+                    except json.JSONDecodeError:
+                        md = {}
+                if not isinstance(md, dict):
+                    md = {}
+
+                capacity = cv.get("capacity")
+                unit = cv.get("unit") or ""
+                label = cv.get("label") or md.get("label") or r["identity"] or "Resource"
+
+                # Sum deployed quantities across active deployments. The
+                # bridge stores `{value: X}` so we extract via JSONB
+                # arrow operator and cast.
+                deployed_row = await conn.fetchrow(
+                    "SELECT COALESCE(SUM((deployed_quantity->>'value')::float), 0) AS total, "
+                    "       COUNT(*) AS deployments "
+                    "FROM resource_deployments rd "
+                    "JOIN commitments c ON c.id = rd.commitment_id "
+                    "WHERE rd.resource_id = $1 "
+                    "  AND rd.released_at IS NULL "
+                    "  AND c.tenant_id = $2 "
+                    "  AND c.terminal_at IS NULL",
+                    r["id"], auth.tenant_id,
+                )
+                total_deployed = float(deployed_row["total"] or 0.0)
+                deployments_count = int(deployed_row["deployments"] or 0)
+
+                cap = float(capacity) if isinstance(capacity, (int, float)) else 0.0
+                util_pct = (total_deployed / cap * 100.0) if cap > 0 else 0.0
+
+                # Top 5 consumers (commit titles) for the per-resource
+                # detail panel. Scoped to the same active set.
+                top_rows = await conn.fetch(
+                    "SELECT c.id, c.title, c.state, c.owner_id, "
+                    "       (rd.deployed_quantity->>'value')::float AS qty "
+                    "FROM resource_deployments rd "
+                    "JOIN commitments c ON c.id = rd.commitment_id "
+                    "WHERE rd.resource_id = $1 "
+                    "  AND rd.released_at IS NULL "
+                    "  AND c.tenant_id = $2 "
+                    "  AND c.terminal_at IS NULL "
+                    "ORDER BY (rd.deployed_quantity->>'value')::float DESC NULLS LAST "
+                    "LIMIT 5",
+                    r["id"], auth.tenant_id,
+                )
+                top_consumers: list[dict[str, Any]] = []
+                for tr in top_rows:
+                    top_consumers.append({
+                        "commitment_id": str(tr["id"]),
+                        "label": tr["title"] or "(untitled)",
+                        "state": tr["state"],
+                        "owner_id": (
+                            str(tr["owner_id"]) if tr["owner_id"] else None
+                        ),
+                        "deployed_quantity": float(tr["qty"] or 0.0),
+                    })
+
+                # Health label from utilization band.
+                if util_pct >= 100.0:
+                    health = "over-allocated"
+                elif util_pct >= 85.0:
+                    health = "constrained"
+                elif util_pct >= 50.0:
+                    health = "deployed"
+                elif util_pct > 0:
+                    health = "under-utilized"
+                else:
+                    health = "available"
+
+                resources_payload.append({
+                    "id": str(r["id"]),
+                    "kind": r["kind"],
+                    "identity": r["identity"],
+                    "label": label,
+                    "description": r["description"] or "",
+                    "capacity": cap,
+                    "unit": unit,
+                    "deployed": total_deployed,
+                    "available": max(0.0, cap - total_deployed),
+                    "utilization_pct": util_pct,
+                    "deployments_count": deployments_count,
+                    "health": health,
+                    "category": md.get("category"),
+                    "top_consumers": top_consumers,
+                })
+
+        return JSONResponse(
+            {"resources": resources_payload},
+            status_code=200,
+        )
+
+    # ---------------- /v1/structure/resources/{rid}/overlay -----
+    # Single-resource focus payload — the resource itself + every
+    # commitment consuming it (ordered by deployed quantity desc) +
+    # owner + customer references so the focus view can render edges
+    # to all touch points without a second roundtrip.
+    @app.get("/v1/structure/resources/{rid}/overlay")
+    async def structure_resource_overlay(
+        rid: str, request: Request,
+    ) -> JSONResponse:
+        auth: AuthContext | None = getattr(request.state, "auth", None)
+        if auth is None:  # pragma: no cover
+            return _unauth("missing_bearer")
+        try:
+            resource_uuid = UUID(rid)
+        except (ValueError, TypeError):
+            return JSONResponse(
+                {"error": "invalid_resource_id"}, status_code=400,
+            )
+
+        deps = _deps(request)
+        async with deps.pool.acquire() as conn:
+            r = await conn.fetchrow(
+                "SELECT id, kind, identity, description, current_value, "
+                "       utilization_state, metadata "
+                "FROM resources "
+                "WHERE id = $1 AND tenant_id = $2 "
+                "  AND archived_at IS NULL",
+                resource_uuid, auth.tenant_id,
+            )
+            if r is None:
+                return JSONResponse(
+                    {"error": "not_found"}, status_code=404,
+                )
+
+            cv = r["current_value"]
+            if isinstance(cv, str):
+                try:
+                    cv = json.loads(cv)
+                except json.JSONDecodeError:
+                    cv = {}
+            if not isinstance(cv, dict):
+                cv = {}
+            md = r["metadata"]
+            if isinstance(md, str):
+                try:
+                    md = json.loads(md)
+                except json.JSONDecodeError:
+                    md = {}
+            if not isinstance(md, dict):
+                md = {}
+
+            consumers = await conn.fetch(
+                "SELECT c.id, c.title, c.state, c.owner_id, c.due_date, "
+                "       (rd.deployed_quantity->>'value')::float AS qty "
+                "FROM resource_deployments rd "
+                "JOIN commitments c ON c.id = rd.commitment_id "
+                "WHERE rd.resource_id = $1 "
+                "  AND rd.released_at IS NULL "
+                "  AND c.tenant_id = $2 "
+                "  AND c.terminal_at IS NULL "
+                "ORDER BY (rd.deployed_quantity->>'value')::float DESC NULLS LAST "
+                "LIMIT 80",
+                resource_uuid, auth.tenant_id,
+            )
+
+            consumers_payload: list[dict[str, Any]] = []
+            owner_ids: set[UUID] = set()
+            for cr in consumers:
+                if cr["owner_id"] is not None:
+                    owner_ids.add(cr["owner_id"])
+                consumers_payload.append({
+                    "id": str(cr["id"]),
+                    "label": cr["title"] or "(untitled)",
+                    "state": cr["state"],
+                    "owner_id": (
+                        str(cr["owner_id"]) if cr["owner_id"] else None
+                    ),
+                    "due_date": (
+                        cr["due_date"].date().isoformat()
+                        if cr["due_date"] is not None else None
+                    ),
+                    "deployed_quantity": float(cr["qty"] or 0.0),
+                })
+
+            owners_payload: list[dict[str, Any]] = []
+            if owner_ids:
+                owner_rows = await conn.fetch(
+                    "SELECT id, display_name, metadata FROM actors "
+                    "WHERE tenant_id = $1 AND id = ANY($2::uuid[])",
+                    auth.tenant_id, list(owner_ids),
+                )
+                for orow in owner_rows:
+                    md_o = orow["metadata"]
+                    if isinstance(md_o, str):
+                        try:
+                            md_o = json.loads(md_o)
+                        except json.JSONDecodeError:
+                            md_o = {}
+                    if not isinstance(md_o, dict):
+                        md_o = {}
+                    role = md_o.get("title") or md_o.get("role") or "Team member"
+                    owners_payload.append({
+                        "id": str(orow["id"]),
+                        "label": orow["display_name"],
+                        "role": role,
+                    })
+
+            cap = float(cv.get("capacity") or 0.0)
+            total_deployed = sum(c["deployed_quantity"] for c in consumers_payload)
+            util_pct = (total_deployed / cap * 100.0) if cap > 0 else 0.0
+
+        return JSONResponse(
+            {
+                "resource": {
+                    "id": str(r["id"]),
+                    "kind": r["kind"],
+                    "identity": r["identity"],
+                    "label": cv.get("label") or md.get("label") or r["identity"],
+                    "description": r["description"] or "",
+                    "capacity": cap,
+                    "unit": cv.get("unit") or "",
+                    "deployed": total_deployed,
+                    "utilization_pct": util_pct,
+                    "category": md.get("category"),
+                },
+                "consumers": consumers_payload,
+                "owners": owners_payload,
             },
             status_code=200,
         )
@@ -1485,6 +1760,35 @@ def _register_routes(app: FastAPI) -> None:
                 brand_name=brand_name,
                 conn=conn,
                 days_since_inception=days_since,
+            )
+        return JSONResponse(payload.to_dict(), status_code=200)
+
+    # ---------------- /v1/history (History page aggregator) -------
+    # Returns events / predictions / arcs / calibration / layer_counts
+    # for the period requested. services.history.aggregator owns the
+    # substrate→UI mapping; this handler is just the HTTP shell.
+    @app.get("/v1/history")
+    async def history_endpoint(request: Request) -> JSONResponse:
+        from services.history import build_history
+
+        auth: AuthContext | None = getattr(request.state, "auth", None)
+        if auth is None:  # pragma: no cover — middleware enforces
+            return _unauth("missing_bearer")
+
+        period = request.query_params.get("period") or "90d"
+        if period not in ("7d", "30d", "90d", "365d", "all"):
+            return JSONResponse(
+                {"error": "invalid_period",
+                 "reason": "expected one of 7d/30d/90d/365d/all"},
+                status_code=400,
+            )
+
+        deps = _deps(request)
+        async with deps.pool.acquire() as conn:
+            payload = await build_history(
+                tenant_id=auth.tenant_id,
+                period=period,
+                conn=conn,
             )
         return JSONResponse(payload.to_dict(), status_code=200)
 
@@ -2054,6 +2358,23 @@ async def _fetch_commitment_overlay(
         cid, tenant_id,
     )
 
+    # Capacity resources consumed by this commitment. We exclude the
+    # `relational` kind so customer rows (also stored in `resources`)
+    # don't double-count as capacity resources in the graph.
+    consumed_resource_rows = await conn.fetch(
+        "SELECT r.id, r.kind, r.identity, r.description, r.current_value, "
+        "       r.utilization_state, r.metadata, "
+        "       rd.deployed_quantity "
+        "FROM resources r "
+        "JOIN resource_deployments rd ON rd.resource_id = r.id "
+        "WHERE rd.commitment_id = $1 "
+        "  AND rd.released_at IS NULL "
+        "  AND r.tenant_id = $2 "
+        "  AND r.kind IN ('human', 'financial', 'technical', 'time') "
+        "ORDER BY r.kind, r.identity",
+        cid, tenant_id,
+    )
+
     decision_rows = await conn.fetch(
         "SELECT d.id, d.title, d.decision_text, d.rationale, d.state "
         "FROM decisions d "
@@ -2239,6 +2560,44 @@ async def _fetch_commitment_overlay(
             ) else "in-force",
         })
 
+    # Resources consumed by this commitment — used by the right quadrant
+    # of the relational graph and the commitment side-panel "Resources"
+    # block. Each entry carries the deployed quantity in the resource's
+    # native unit (FTE, USD, engineer-weeks, GPU-hours).
+    resources_payload: list[dict[str, Any]] = []
+    for rr in consumed_resource_rows:
+        cv = rr["current_value"]
+        if isinstance(cv, str):
+            try:
+                cv = json.loads(cv)
+            except json.JSONDecodeError:
+                cv = {}
+        if not isinstance(cv, dict):
+            cv = {}
+        md = rr["metadata"]
+        if isinstance(md, str):
+            try:
+                md = json.loads(md)
+            except json.JSONDecodeError:
+                md = {}
+        if not isinstance(md, dict):
+            md = {}
+        dq = rr["deployed_quantity"]
+        if isinstance(dq, str):
+            try:
+                dq = json.loads(dq)
+            except json.JSONDecodeError:
+                dq = {}
+        if not isinstance(dq, dict):
+            dq = {}
+        resources_payload.append({
+            "id": str(rr["id"]),
+            "label": cv.get("label") or md.get("label") or rr["identity"] or "Resource",
+            "kind": rr["kind"],
+            "unit": cv.get("unit"),
+            "deployed_quantity": dq.get("value"),
+        })
+
     # Build LearnedPattern bundles from the scoped models. Each model's
     # natural-language statement becomes the pattern statement;
     # supporting_event_ids resolve to short evidence snippets via a
@@ -2305,9 +2664,14 @@ async def _fetch_commitment_overlay(
         "edges": {
             "contributes_to": [str(g["id"]) for g in goal_rows],
             "constrained_by": [str(d["id"]) for d in decision_rows],
-            "consumes": [],  # capacity resources — Pelago has none yet
+            "consumes": [r["id"] for r in resources_payload],
             "contributors": [str(c["id"]) for c in contributor_rows],
         },
+        # Per-commit slice of every consumed resource (label, unit,
+        # deployed_quantity in the resource's native unit). Lets the
+        # commitment focus view show "Engineering pod · 0.4 FTE"
+        # without a second roundtrip to fetch resource metadata.
+        "consumed_resources": resources_payload,
         "substrate_insight": substrate_insight,
         "activity": activity_payload,
         "learnings": learnings_payload,
@@ -2319,6 +2683,7 @@ async def _fetch_commitment_overlay(
         "people": people_payload,
         "customers": customers_payload,
         "decisions": decisions_payload,
+        "resources": resources_payload,
     }
 
 
@@ -2793,7 +3158,7 @@ async def _build_resource_drawer(
 ) -> dict[str, Any] | None:
     row = await conn.fetchrow(
         "SELECT id, kind, identity, description, current_value, "
-        "utilization_state, controllability, "
+        "utilization_state, controllability, metadata, "
         "created_at, last_updated_at "
         "FROM resources WHERE id = $1 AND tenant_id = $2",
         aid, tenant_id,
@@ -2806,40 +3171,156 @@ async def _build_resource_drawer(
             cv = json.loads(cv)
         except json.JSONDecodeError:
             cv = None
-    cv_str = (
-        f"{cv.get('value')} {cv.get('unit', '')}".strip()
-        if isinstance(cv, dict) and cv.get("value") is not None
-        else "—"
-    )
-    summary_bits = [
-        f"{row['kind'] or 'resource'}",
-        row["utilization_state"] or "",
+    if not isinstance(cv, dict):
+        cv = {}
+    md = row["metadata"]
+    if isinstance(md, str):
+        try:
+            md = json.loads(md)
+        except json.JSONDecodeError:
+            md = {}
+    if not isinstance(md, dict):
+        md = {}
+
+    is_capacity_kind = row["kind"] in ("human", "financial", "technical", "time")
+    label = cv.get("label") or md.get("label") or row["identity"] or "Resource"
+    capacity = cv.get("capacity")
+    unit = cv.get("unit") or ""
+    legacy_value = cv.get("value")  # customer rows etc.
+
+    # Aggregate deployed quantity if this is a capacity resource.
+    total_deployed = 0.0
+    deployments_count = 0
+    util_pct = 0.0
+    if is_capacity_kind:
+        agg = await conn.fetchrow(
+            "SELECT COALESCE(SUM((deployed_quantity->>'value')::float), 0) AS total, "
+            "       COUNT(*) AS n "
+            "FROM resource_deployments rd "
+            "JOIN commitments c ON c.id = rd.commitment_id "
+            "WHERE rd.resource_id = $1 "
+            "  AND rd.released_at IS NULL "
+            "  AND c.tenant_id = $2 "
+            "  AND c.terminal_at IS NULL",
+            aid, tenant_id,
+        )
+        total_deployed = float(agg["total"] or 0.0)
+        deployments_count = int(agg["n"] or 0)
+        if isinstance(capacity, (int, float)) and capacity > 0:
+            util_pct = total_deployed / float(capacity) * 100.0
+
+    if is_capacity_kind and isinstance(capacity, (int, float)):
+        capacity_str = f"{_fmt_quantity(capacity, unit)}"
+        deployed_str = f"{_fmt_quantity(total_deployed, unit)}"
+        util_str = f"{util_pct:.0f}% utilized"
+    elif legacy_value is not None:
+        capacity_str = f"{legacy_value} {unit}".strip()
+        deployed_str = "—"
+        util_str = "—"
+    else:
+        capacity_str = "—"
+        deployed_str = "—"
+        util_str = "—"
+
+    summary_bits: list[str] = [row["kind"] or "resource"]
+    if is_capacity_kind:
+        summary_bits.append(util_str)
+    elif row["utilization_state"]:
+        summary_bits.append(row["utilization_state"])
+
+    fields_rows: list[dict[str, Any]] = [
+        {"label": "Kind", "value": row["kind"] or "—"},
     ]
-    summary_bits = [b for b in summary_bits if b]
+    if is_capacity_kind:
+        fields_rows.extend([
+            {"label": "Capacity", "value": capacity_str},
+            {"label": "Deployed", "value": deployed_str},
+            {"label": "Utilization", "value": util_str},
+            {"label": "Active commitments", "value": str(deployments_count)},
+        ])
+    else:
+        fields_rows.extend([
+            {"label": "Current", "value": capacity_str},
+            {"label": "Utilization", "value": row["utilization_state"] or "—"},
+        ])
+    fields_rows.append({"label": "Control", "value": row["controllability"] or "—"})
+    fields_rows.append({"label": "Updated", "value": _ago(row["last_updated_at"])})
 
     sections: list[dict[str, Any]] = [
-        {
-            "kind": "fields",
-            "title": "At a glance",
-            "rows": [
-                {"label": "Kind", "value": row["kind"] or "—"},
-                {"label": "Current", "value": cv_str},
-                {"label": "Utilization", "value": row["utilization_state"] or "—"},
-                {"label": "Control", "value": row["controllability"] or "—"},
-                {"label": "Updated", "value": _ago(row["last_updated_at"])},
-            ],
-        }
+        {"kind": "fields", "title": "At a glance", "rows": fields_rows},
     ]
     if row["description"]:
-        sections.append({"kind": "narrative", "title": "Description", "body": row["description"]})
+        sections.append({
+            "kind": "narrative",
+            "title": "Description",
+            "body": row["description"],
+        })
+
+    if is_capacity_kind:
+        consumers = await conn.fetch(
+            "SELECT c.id, c.title, c.state, "
+            "       (rd.deployed_quantity->>'value')::float AS qty, "
+            "       a.display_name AS owner_name "
+            "FROM resource_deployments rd "
+            "JOIN commitments c ON c.id = rd.commitment_id "
+            "LEFT JOIN actors a ON a.id = c.owner_id "
+            "WHERE rd.resource_id = $1 "
+            "  AND rd.released_at IS NULL "
+            "  AND c.tenant_id = $2 "
+            "  AND c.terminal_at IS NULL "
+            "ORDER BY (rd.deployed_quantity->>'value')::float DESC NULLS LAST "
+            "LIMIT 8",
+            aid, tenant_id,
+        )
+        items: list[dict[str, Any]] = []
+        for cr in consumers:
+            qty = float(cr["qty"] or 0.0)
+            secondary = cr["owner_name"] or ""
+            meta_str = (
+                f"{_fmt_quantity(qty, unit)}" if unit else f"{qty:.2g}"
+            )
+            if cr["state"]:
+                meta_str = f"{meta_str} · {cr['state']}"
+            items.append({
+                "type": "commitment",
+                "id": str(cr["id"]),
+                "primary": cr["title"] or "(untitled)",
+                "secondary": secondary,
+                "meta": meta_str,
+            })
+        sections.append({
+            "kind": "links",
+            "title": "Top consumers",
+            "items": items,
+            "empty_text": "No active commitments are drawing on this resource.",
+        })
+
     return {
         "type": "resource",
         "id": str(row["id"]),
-        "title": row["identity"] or "(unnamed)",
+        "title": label,
         "subtitle": f"resource · {row['kind'] or 'unknown'}",
         "summary": " · ".join(summary_bits),
         "sections": sections,
     }
+
+
+def _fmt_quantity(value: float, unit: str) -> str:
+    """Pretty-format a quantity in its unit. Cash gets dollar formatting,
+    FTE gets one decimal, engineer-weeks/credits/GPU-hours get integer
+    rounding."""
+    u = (unit or "").lower()
+    if "usd" in u:
+        if value >= 1_000_000:
+            return f"${value / 1_000_000:.1f}M"
+        if value >= 1_000:
+            return f"${value / 1_000:.0f}k"
+        return f"${value:.0f}"
+    if "fte" in u:
+        return f"{value:.1f} FTE"
+    if not unit:
+        return f"{value:.2f}"
+    return f"{value:.0f} {unit}"
 
 
 # ----- observation ----------------------------------------------------

@@ -31,6 +31,7 @@ const ENTITY_LABEL: Record<EntityKind, string> = {
   goals: "Goals only",
   commitments: "Commitments only",
   people: "Team only",
+  resources: "Resources only",
 };
 
 export function MapControls({

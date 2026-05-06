@@ -29,13 +29,19 @@ import type {
 import {
   getStructureOverlay,
   getStructureRecent,
+  getStructureResourceOverlay,
+  getStructureResourcesAggregate,
   type StructureOverlayCommitment,
   type StructureOverlayCustomer,
   type StructureOverlayDecision,
   type StructureOverlayGoal,
   type StructureOverlayPerson,
+  type StructureOverlayResource,
   type StructureOverlayResponse,
+  type StructureResourceAggregate,
+  type StructureResourceOverlayResponse,
 } from "@/api/structure-client";
+import { ResourceAggregateView } from "@/components/structure/ResourceAggregateView";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -49,21 +55,33 @@ type OverlayState = {
   people: StructureOverlayPerson[];
   customers: StructureOverlayCustomer[];
   decisions: StructureOverlayDecision[];
+  resources: StructureOverlayResource[];
 };
 
 function emptyOverlayState(): OverlayState {
-  return { commitments: [], goals: [], people: [], customers: [], decisions: [] };
+  return {
+    commitments: [], goals: [], people: [], customers: [],
+    decisions: [], resources: [],
+  };
 }
 
 function mergeOverlayBundle(
   state: OverlayState,
-  bundle: { commitments: StructureOverlayCommitment[]; goals: StructureOverlayGoal[]; people: StructureOverlayPerson[]; customers: StructureOverlayCustomer[]; decisions?: StructureOverlayDecision[] }
+  bundle: {
+    commitments: StructureOverlayCommitment[];
+    goals: StructureOverlayGoal[];
+    people: StructureOverlayPerson[];
+    customers: StructureOverlayCustomer[];
+    decisions?: StructureOverlayDecision[];
+    resources?: StructureOverlayResource[];
+  }
 ): OverlayState {
   const cIds = new Set(state.commitments.map((c) => c.id));
   const gIds = new Set(state.goals.map((g) => g.id));
   const pIds = new Set(state.people.map((p) => p.id));
   const customerIds = new Set(state.customers.map((c) => c.id));
   const decisionIds = new Set(state.decisions.map((d) => d.id));
+  const resourceIds = new Set(state.resources.map((r) => r.id));
   return {
     commitments: [
       ...bundle.commitments.filter((c) => !cIds.has(c.id)),
@@ -84,6 +102,10 @@ function mergeOverlayBundle(
     decisions: [
       ...state.decisions,
       ...(bundle.decisions ?? []).filter((d) => !decisionIds.has(d.id)),
+    ],
+    resources: [
+      ...state.resources,
+      ...(bundle.resources ?? []).filter((r) => !resourceIds.has(r.id)),
     ],
   };
 }
@@ -168,6 +190,15 @@ export default function Structure() {
     emptyOverlayState()
   );
   const [overlayError, setOverlayError] = useState<string | null>(null);
+  // Aggregate resource portfolio (capacity + utilization). Fetched
+  // once on mount; refreshed every 30s while the page is visible.
+  const [resourceAggregate, setResourceAggregate] = useState<
+    StructureResourceAggregate[]
+  >([]);
+  // Per-resource focus payload — only populated when focus.kind === "resource".
+  const [resourceFocus, setResourceFocus] = useState<
+    StructureResourceOverlayResponse | null
+  >(null);
   // Tracks whether the initial /v1/structure/recent fetch has completed.
   // While in-flight we suppress the SAMPLE_* fallback graph so the user
   // doesn't see a placeholder count (e.g., ~47) flash before the real
@@ -197,6 +228,7 @@ export default function Structure() {
             people: res.people,
             customers: res.customers,
             decisions: res.decisions,
+            resources: res.resources,
           })
         );
       } catch {
@@ -207,15 +239,55 @@ export default function Structure() {
         if (initial && alive) setInitialFetchPending(false);
       }
     }
+    async function fetchAggregate() {
+      try {
+        const res = await getStructureResourcesAggregate();
+        if (!alive) return;
+        setResourceAggregate(res.resources);
+      } catch {
+        // The aggregate endpoint can be missing in older backends or
+        // for tenants without capacity resources — fail silently.
+      }
+    }
     void fetchStructure(true);
+    void fetchAggregate();
     const id = window.setInterval(() => {
       if (firstFetchDone) void fetchStructure(false);
     }, 8000);
+    const aggId = window.setInterval(() => {
+      if (!document.hidden) void fetchAggregate();
+    }, 30000);
     return () => {
       alive = false;
       window.clearInterval(id);
+      window.clearInterval(aggId);
     };
   }, []);
+
+  // When focus is a resource, fetch its overlay (consumers + owners)
+  // so the focus view can render edges to consuming commitments.
+  useEffect(() => {
+    if (focus?.kind !== "resource") {
+      setResourceFocus(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    let alive = true;
+    (async () => {
+      try {
+        const res = await getStructureResourceOverlay(focus.id, ctrl.signal);
+        if (!alive) return;
+        setResourceFocus(res);
+      } catch (err) {
+        if (!alive) return;
+        if (err instanceof Error && err.name === "AbortError") return;
+      }
+    })();
+    return () => {
+      alive = false;
+      ctrl.abort();
+    };
+  }, [focus?.kind, focus?.id]);
 
   // When ?focus=<id> points to a commitment that's not yet in the
   // overlay state or the sample data, fetch the single-commitment
@@ -335,6 +407,38 @@ export default function Structure() {
     if (useApiData) return overlayState.customers;
     return SAMPLE_CUSTOMERS;
   }, [useApiData, overlayState.customers]);
+
+  // Resources for the graph. Prefer the aggregate-endpoint payload
+  // when present (carries capacity + utilization), fall back to the
+  // bare entries that came in via the recent-commitments overlay,
+  // and finally the static SAMPLE_RESOURCES for the no-API mode.
+  const allResources = useMemo(() => {
+    if (useApiData) {
+      if (resourceAggregate.length > 0) {
+        return resourceAggregate.map((r) => ({
+          id: r.id,
+          label: r.label,
+          kind: r.kind,
+          unit: r.unit,
+          capacity: r.capacity,
+          deployed: r.deployed,
+          utilization_pct: r.utilization_pct,
+          deployments_count: r.deployments_count,
+          health: r.health,
+        }));
+      }
+      // Even before the aggregate endpoint resolves, the recent-overlay
+      // payload carries resource id/label/kind so the graph can still
+      // render resource chips on commit focus.
+      return overlayState.resources.map((r) => ({
+        id: r.id,
+        label: r.label,
+        kind: r.kind,
+        unit: r.unit ?? null,
+      }));
+    }
+    return SAMPLE_RESOURCES;
+  }, [useApiData, resourceAggregate, overlayState.resources]);
 
   const allPeopleIndex = useMemo(() => {
     if (useApiData) {
@@ -513,25 +617,35 @@ export default function Structure() {
               commitments={visibleCommitments}
               goals={visibleGoals}
               people={visiblePeople}
+              resources={allResources}
               entityKind={filters.entityKind}
               focus={focus}
               onFocus={setFocus}
               onHover={setHoveredCommitmentId}
             />
-            <RelationshipGraph
-              commitments={visibleCommitments}
-              goals={visibleGoals}
-              decisions={allDecisions}
-              resources={SAMPLE_RESOURCES}
-              peopleIndex={allPeopleIndex}
-              goalLearnings={SAMPLE_GOAL_LEARNINGS}
-              ownerLabels={Object.fromEntries(
-                allOwners.map((o) => [o.id, o.label])
-              )}
-              focus={focus}
-              hoveredCommitmentId={hoveredCommitmentId}
-              onFocus={setFocus}
-            />
+            {filters.entityKind === "resources" && focus === null
+              && resourceAggregate.length > 0 ? (
+              <ResourceAggregateView
+                resources={resourceAggregate}
+                onFocus={(rid) => setFocus({ kind: "resource", id: rid })}
+              />
+            ) : (
+              <RelationshipGraph
+                commitments={visibleCommitments}
+                goals={visibleGoals}
+                decisions={allDecisions}
+                resources={allResources}
+                resourceFocus={resourceFocus}
+                peopleIndex={allPeopleIndex}
+                goalLearnings={SAMPLE_GOAL_LEARNINGS}
+                ownerLabels={Object.fromEntries(
+                  allOwners.map((o) => [o.id, o.label])
+                )}
+                focus={focus}
+                hoveredCommitmentId={hoveredCommitmentId}
+                onFocus={setFocus}
+              />
+            )}
           </div>
         </main>
       </div>

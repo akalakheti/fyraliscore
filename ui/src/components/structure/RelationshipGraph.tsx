@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
+  StructureResourceOverlayResponse,
+} from "@/api/structure-client";
+import type {
   Commitment,
   DecisionRef,
   FocusTarget,
@@ -16,6 +19,7 @@ type Props = {
   goals: GoalRef[];
   decisions: DecisionRef[];
   resources: ResourceRef[];
+  resourceFocus?: StructureResourceOverlayResponse | null;
   peopleIndex: Record<string, PersonProfile>;
   goalLearnings: Record<string, GoalLearnings>;
   ownerLabels: Record<string, string>;
@@ -23,6 +27,19 @@ type Props = {
   hoveredCommitmentId: string | null;
   onFocus: (target: FocusTarget | null) => void;
 };
+
+function formatResourceQty(value: number | null | undefined, unit: string | null | undefined): string {
+  if (value == null) return "";
+  const u = (unit || "").toLowerCase();
+  if (u.includes("usd")) {
+    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+    if (value >= 1_000) return `$${Math.round(value / 1_000)}k`;
+    return `$${Math.round(value)}`;
+  }
+  if (u.includes("fte")) return `${value.toFixed(2)} FTE`;
+  if (!unit) return value.toFixed(2);
+  return `${Math.round(value)} ${unit}`;
+}
 
 // Pan/zoom limits — applied uniformly to actor / commitment / goal /
 // aggregate views.
@@ -46,6 +63,7 @@ export function RelationshipGraph({
   goals,
   decisions,
   resources,
+  resourceFocus,
   peopleIndex,
   goalLearnings,
   ownerLabels,
@@ -102,8 +120,8 @@ export function RelationshipGraph({
     (hoveredCommitmentId ? { kind: "commitment", id: hoveredCommitmentId } : null);
 
   // Decide whether a side panel is shown for the live focus. People,
-  // commitments, and goals all get their own learnings panel.
-  const sidePanelKind: "actor" | "commitment" | "goal" | null =
+  // commitments, goals, and resources each have their own panel kind.
+  const sidePanelKind: "actor" | "commitment" | "goal" | "resource" | null =
     liveFocus
       ? liveFocus.kind === "actor"
         ? "actor"
@@ -111,9 +129,19 @@ export function RelationshipGraph({
         ? "commitment"
         : liveFocus.kind === "goal"
         ? "goal"
+        : liveFocus.kind === "resource"
+        ? "resource"
         : null
       : null;
-  const sidePanelOpen = !!sidePanelKind;
+
+  // The detail panel can be hidden via its X button. Re-show on every
+  // new focus so picking a different artifact brings the panel back
+  // without an extra click.
+  const [panelHidden, setPanelHidden] = useState(false);
+  useEffect(() => {
+    setPanelHidden(false);
+  }, [focus?.kind, focus?.id]);
+  const sidePanelOpen = !!sidePanelKind && !panelHidden;
 
   // Reset pan/zoom whenever focus changes — and pre-shift the graph
   // left when a side panel is open, so the focused artifact stays
@@ -248,7 +276,7 @@ export function RelationshipGraph({
         </g>
       </svg>
 
-      {sidePanelKind === "actor" && liveFocus ? (
+      {sidePanelOpen && sidePanelKind === "actor" && liveFocus ? (
         <ActorPanel
           profile={peopleIndex[liveFocus.id]}
           fallbackLabel={ownerLabels[liveFocus.id] ?? liveFocus.id}
@@ -256,9 +284,10 @@ export function RelationshipGraph({
             (c) => c.owner === liveFocus.id || (c.edges?.contributors ?? []).includes(liveFocus.id)
           )}
           onFocus={onFocus}
+          onHidePanel={() => setPanelHidden(true)}
         />
       ) : null}
-      {sidePanelKind === "commitment" && liveFocus ? (
+      {sidePanelOpen && sidePanelKind === "commitment" && liveFocus ? (
         <CommitmentPanel
           commitment={idIndex.get(liveFocus.id)}
           goalIndex={goalIndex}
@@ -266,9 +295,10 @@ export function RelationshipGraph({
           resourceIndex={resourceIndex}
           ownerLabels={ownerLabels}
           onFocus={onFocus}
+          onHidePanel={() => setPanelHidden(true)}
         />
       ) : null}
-      {sidePanelKind === "goal" && liveFocus ? (
+      {sidePanelOpen && sidePanelKind === "goal" && liveFocus ? (
         <GoalPanel
           goal={goalIndex.get(liveFocus.id)}
           learnings={goalLearnings[liveFocus.id]}
@@ -276,6 +306,16 @@ export function RelationshipGraph({
             (c.edges?.contributes_to ?? []).includes(liveFocus.id)
           )}
           onFocus={onFocus}
+          onHidePanel={() => setPanelHidden(true)}
+        />
+      ) : null}
+      {sidePanelOpen && sidePanelKind === "resource" && liveFocus ? (
+        <ResourcePanel
+          resource={resourceIndex.get(liveFocus.id)}
+          overlay={resourceFocus && resourceFocus.resource.id === liveFocus.id ? resourceFocus : null}
+          ownerLabels={ownerLabels}
+          onFocus={onFocus}
+          onHidePanel={() => setPanelHidden(true)}
         />
       ) : null}
 
@@ -838,17 +878,30 @@ function PanelShell({
   eyebrow,
   name,
   sub,
+  onHidePanel,
   children,
 }: {
   accent: "actor" | "commitment-on-track" | "commitment-slipping" | "commitment-at-risk" | "commitment-blocked" | "goal-strategic" | "goal-operational";
   eyebrow: string;
   name: string;
   sub?: string;
+  onHidePanel?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <aside className={"rg-side-panel rg-side-panel-" + accent} aria-label={eyebrow}>
       <div className="rg-actor-panel">
+        {onHidePanel ? (
+          <button
+            type="button"
+            className="rg-actor-panel-close"
+            onClick={onHidePanel}
+            aria-label="Hide panel"
+            title="Hide panel"
+          >
+            ×
+          </button>
+        ) : null}
         <div className="rg-actor-panel-head">
           <span className="rg-actor-panel-eyebrow">{eyebrow}</span>
           <span className="rg-actor-panel-name">{name}</span>
@@ -919,11 +972,13 @@ function ActorPanel({
   fallbackLabel,
   commitments,
   onFocus,
+  onHidePanel,
 }: {
   profile: PersonProfile | undefined;
   fallbackLabel: string;
   commitments: Commitment[];
   onFocus: (t: FocusTarget | null) => void;
+  onHidePanel: () => void;
 }) {
   const offTrack = commitments.filter((c) => c.status !== "on-track").length;
   const high = commitments.filter((c) => c.priority === "high").length;
@@ -932,7 +987,13 @@ function ActorPanel({
   );
   if (!profile) {
     return (
-      <PanelShell accent="actor" eyebrow="Person" name={fallbackLabel} sub="PERSON">
+      <PanelShell
+        accent="actor"
+        eyebrow="Person"
+        name={fallbackLabel}
+        sub="PERSON"
+        onHidePanel={onHidePanel}
+      >
         <p className="rg-actor-recent">No profile data for this person yet.</p>
       </PanelShell>
     );
@@ -943,6 +1004,7 @@ function ActorPanel({
       eyebrow="What I've learned"
       name={profile.label}
       sub={profile.role}
+      onHidePanel={onHidePanel}
     >
       <div className="rg-actor-stats">
         <div className="rg-actor-stat">
@@ -987,6 +1049,7 @@ function CommitmentPanel({
   resourceIndex,
   ownerLabels,
   onFocus,
+  onHidePanel,
 }: {
   commitment: Commitment | undefined;
   goalIndex: Map<string, GoalRef>;
@@ -994,6 +1057,7 @@ function CommitmentPanel({
   resourceIndex: Map<string, ResourceRef>;
   ownerLabels: Record<string, string>;
   onFocus: (t: FocusTarget | null) => void;
+  onHidePanel: () => void;
 }) {
   if (!commitment) return null;
   const c = commitment;
@@ -1022,6 +1086,7 @@ function CommitmentPanel({
       eyebrow="What I've noticed"
       name={c.label}
       sub={`${c.id.toUpperCase()} · ${c.status.replace("-", " ").toUpperCase()}`}
+      onHidePanel={onHidePanel}
     >
       <div className="rg-actor-stats">
         <div className="rg-actor-stat">
@@ -1115,11 +1180,13 @@ function GoalPanel({
   learnings,
   commitments,
   onFocus,
+  onHidePanel,
 }: {
   goal: GoalRef | undefined;
   learnings: GoalLearnings | undefined;
   commitments: Commitment[];
   onFocus: (t: FocusTarget | null) => void;
+  onHidePanel: () => void;
 }) {
   if (!goal) return null;
   const total = commitments.length;
@@ -1138,6 +1205,7 @@ function GoalPanel({
       eyebrow="What I've noticed"
       name={goal.label}
       sub={`${goal.altitude.toUpperCase()} GOAL`}
+      onHidePanel={onHidePanel}
     >
       <div className="rg-actor-stats">
         <div className="rg-actor-stat">
@@ -1200,6 +1268,151 @@ function formatLongDate(iso: string): string {
 }
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function ResourcePanel({
+  resource,
+  overlay,
+  ownerLabels,
+  onFocus,
+  onHidePanel,
+}: {
+  resource: ResourceRef | undefined;
+  overlay: StructureResourceOverlayResponse | null;
+  ownerLabels: Record<string, string>;
+  onFocus: (t: FocusTarget | null) => void;
+  onHidePanel: () => void;
+}) {
+  if (!resource) {
+    return (
+      <PanelShell
+        accent="actor"
+        eyebrow="Resource"
+        name="(unknown resource)"
+        onHidePanel={onHidePanel}
+      >
+        <p className="rg-actor-recent">Resource details aren't loaded yet.</p>
+      </PanelShell>
+    );
+  }
+  const accent =
+    resource.kind === "human" ? "actor"
+    : resource.kind === "financial" ? "goal-strategic"
+    : resource.kind === "technical" ? "commitment-on-track"
+    : "goal-operational";
+
+  // Prefer overlay numbers when available, fall back to summary fields
+  // baked into the ResourceRef from the aggregate endpoint.
+  const capacity = overlay?.resource.capacity ?? resource.capacity ?? null;
+  const deployed = overlay?.resource.deployed ?? resource.deployed ?? null;
+  const utilPct = overlay?.resource.utilization_pct ?? resource.utilization_pct ?? null;
+  const unit = overlay?.resource.unit ?? resource.unit ?? "";
+  const description = overlay?.resource.description ?? "";
+  const consumers = overlay?.consumers ?? [];
+
+  const barWidth = utilPct == null ? 0 : Math.min(100, Math.max(0, utilPct));
+  const overflow = utilPct != null && utilPct > 100 ? Math.min(50, utilPct - 100) : 0;
+
+  return (
+    <PanelShell
+      accent={accent}
+      eyebrow="Resource"
+      name={resource.label}
+      sub={resource.kind.toUpperCase()}
+      onHidePanel={onHidePanel}
+    >
+      <div className="rg-actor-stats">
+        <div className="rg-actor-stat">
+          <span className="rg-actor-stat-num">
+            {capacity != null ? formatResourceQty(capacity, unit) : "—"}
+          </span>
+          <span className="rg-actor-stat-lbl">capacity</span>
+        </div>
+        <div className={"rg-actor-stat" + (utilPct != null && utilPct > 100 ? " warn" : "")}>
+          <span className="rg-actor-stat-num">
+            {deployed != null ? formatResourceQty(deployed, unit) : "—"}
+          </span>
+          <span className="rg-actor-stat-lbl">deployed</span>
+        </div>
+        <div className={"rg-actor-stat" + (utilPct != null && utilPct > 100 ? " warn" : "")}>
+          <span className="rg-actor-stat-num">
+            {utilPct != null ? Math.round(utilPct) + "%" : "—"}
+          </span>
+          <span className="rg-actor-stat-lbl">utilized</span>
+        </div>
+      </div>
+
+      {utilPct != null ? (
+        <div className="rg-resource-bar" aria-hidden>
+          <div
+            className={"rg-resource-bar-fill" + (utilPct > 100 ? " over" : utilPct >= 85 ? " warn" : "")}
+            style={{ width: barWidth + "%" }}
+          />
+          {overflow > 0 ? (
+            <div className="rg-resource-bar-over" style={{ width: overflow + "%" }} />
+          ) : null}
+        </div>
+      ) : null}
+
+      {description ? (
+        <section className="rg-actor-section">
+          <h4>About</h4>
+          <p className="rg-actor-recent">{description}</p>
+        </section>
+      ) : null}
+
+      <section className="rg-actor-section">
+        <h4>Consuming commitments {consumers.length > 0 ? `(${consumers.length})` : ""}</h4>
+        {consumers.length === 0 ? (
+          <p className="rg-actor-patterns-empty">
+            {overlay
+              ? "No active commitments are pulling on this resource."
+              : "Loading consumers…"}
+          </p>
+        ) : (
+          <ul className="rg-link-list">
+            {consumers.slice(0, 12).map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className="rg-link-row"
+                  onClick={() => onFocus({ kind: "commitment", id: c.id })}
+                >
+                  <span className="rg-link-glyph">▤</span>
+                  <span className="rg-link-label">{c.label}</span>
+                  <span className="rg-link-meta">
+                    {formatResourceQty(c.deployed_quantity, unit)}
+                    {c.state ? ` · ${c.state}` : ""}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {overlay && overlay.owners.length > 0 ? (
+        <section className="rg-actor-section">
+          <h4>Top owners</h4>
+          <ul className="rg-link-list">
+            {overlay.owners.slice(0, 8).map((o) => (
+              <li key={o.id}>
+                <button
+                  type="button"
+                  className="rg-link-row"
+                  onClick={() => onFocus({ kind: "actor", id: o.id })}
+                >
+                  <span className="rg-link-glyph">◯</span>
+                  <span className="rg-link-label">{o.label}</span>
+                  <span className="rg-link-meta">{o.role}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </PanelShell>
+  );
 }
 
 // Single pattern row inside the side panel. Click toggles the evidence

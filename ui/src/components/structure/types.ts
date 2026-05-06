@@ -14,7 +14,7 @@ export type TerritoryId =
 export type LayerId = "commits" | "decisions" | "people" | "customers" | "model";
 
 export type LayoutMode = "relational" | "territory" | "two-axis";
-export type EntityKind = "all" | "goals" | "commitments" | "people";
+export type EntityKind = "all" | "goals" | "commitments" | "people" | "resources";
 
 export type PatternEvidence = {
   // ISO YYYY-MM-DD or human-friendly window like "Q1 2026".
@@ -56,7 +56,22 @@ export type PersonProfile = {
 
 export type GoalRef = { id: string; label: string; altitude: "strategic" | "operational" };
 export type DecisionRef = { id: string; label: string; state: "in-force" | "drifting" | "revisited" };
-export type ResourceRef = { id: string; label: string; kind: "financial" | "human" | "technical" };
+export type ResourceKind = "financial" | "human" | "technical" | "time";
+export type ResourceRef = {
+  id: string;
+  label: string;
+  kind: ResourceKind;
+  // Optional metrics — present when the row comes from the
+  // /v1/structure/resources/aggregate endpoint, absent for sample data.
+  unit?: string | null;
+  capacity?: number | null;
+  deployed?: number | null;
+  utilization_pct?: number | null;
+  deployments_count?: number | null;
+  health?: "available" | "under-utilized" | "deployed" | "constrained" | "over-allocated" | null;
+  // Per-commitment slice (only on commitment overlay path).
+  deployed_quantity?: number | null;
+};
 
 export type CommitmentEdges = {
   contributes_to: string[];   // goal ids

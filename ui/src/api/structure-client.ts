@@ -58,6 +58,10 @@ export type StructureOverlayCommitment = {
     consumes: string[];
     contributors: string[];
   };
+  // Per-commit slice of every consumed resource. Carries the deployed
+  // quantity in the resource's native unit so chips can render
+  // "Engineering pod · 0.4 FTE" without a separate fetch.
+  consumed_resources?: StructureOverlayResource[];
   substrate_insight?: string | null;
   activity?: { date: string; desc: string }[];
   learnings?: StructureOverlayPattern[];
@@ -86,12 +90,24 @@ export type StructureOverlayDecision = {
   state: "in-force" | "drifting" | "revisited";
 };
 
+export type StructureOverlayResource = {
+  id: string;
+  label: string;
+  kind: "human" | "financial" | "technical" | "time";
+  unit?: string | null;
+  // Per-commitment deployed quantity. Present on the commitment-overlay
+  // payload (each commit's slice); absent on the recent-list payload
+  // (resources are deduped at top level there).
+  deployed_quantity?: number | null;
+};
+
 export type StructureOverlayResponse = {
   commitment: StructureOverlayCommitment;
   goals: StructureOverlayGoal[];
   people: StructureOverlayPerson[];
   customers: StructureOverlayCustomer[];
   decisions?: StructureOverlayDecision[];
+  resources?: StructureOverlayResource[];
 };
 
 export type StructureRecentResponse = {
@@ -100,6 +116,69 @@ export type StructureRecentResponse = {
   people: StructureOverlayPerson[];
   customers: StructureOverlayCustomer[];
   decisions?: StructureOverlayDecision[];
+  resources?: StructureOverlayResource[];
+};
+
+export type ResourceHealth =
+  | "available"
+  | "under-utilized"
+  | "deployed"
+  | "constrained"
+  | "over-allocated";
+
+export type ResourceTopConsumer = {
+  commitment_id: string;
+  label: string;
+  state: string | null;
+  owner_id: string | null;
+  deployed_quantity: number;
+};
+
+export type StructureResourceAggregate = {
+  id: string;
+  kind: "human" | "financial" | "technical" | "time";
+  identity: string;
+  label: string;
+  description: string;
+  capacity: number;
+  unit: string;
+  deployed: number;
+  available: number;
+  utilization_pct: number;
+  deployments_count: number;
+  health: ResourceHealth;
+  category: string | null;
+  top_consumers: ResourceTopConsumer[];
+};
+
+export type StructureResourcesAggregateResponse = {
+  resources: StructureResourceAggregate[];
+};
+
+export type StructureResourceConsumer = {
+  id: string;
+  label: string;
+  state: string | null;
+  owner_id: string | null;
+  due_date: string | null;
+  deployed_quantity: number;
+};
+
+export type StructureResourceOverlayResponse = {
+  resource: {
+    id: string;
+    kind: "human" | "financial" | "technical" | "time";
+    identity: string;
+    label: string;
+    description: string;
+    capacity: number;
+    unit: string;
+    deployed: number;
+    utilization_pct: number;
+    category: string | null;
+  };
+  consumers: StructureResourceConsumer[];
+  owners: StructureOverlayPerson[];
 };
 
 export function getStructureOverlay(
@@ -119,6 +198,27 @@ export function getStructureRecent(
 ): Promise<StructureRecentResponse> {
   return request<StructureRecentResponse>(
     `/v1/structure/recent?since_minutes=${sinceMinutes}`,
+    undefined,
+    signal
+  );
+}
+
+export function getStructureResourcesAggregate(
+  signal?: AbortSignal
+): Promise<StructureResourcesAggregateResponse> {
+  return request<StructureResourcesAggregateResponse>(
+    `/v1/structure/resources/aggregate`,
+    undefined,
+    signal
+  );
+}
+
+export function getStructureResourceOverlay(
+  resourceId: string,
+  signal?: AbortSignal
+): Promise<StructureResourceOverlayResponse> {
+  return request<StructureResourceOverlayResponse>(
+    `/v1/structure/resources/${resourceId}/overlay`,
     undefined,
     signal
   );

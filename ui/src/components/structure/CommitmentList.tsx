@@ -5,16 +5,38 @@ import type {
   FocusTarget,
   GoalRef,
   PersonProfile,
+  ResourceRef,
 } from "./types";
 
 type Props = {
   commitments: Commitment[];
   goals: GoalRef[];
   people: PersonProfile[];
+  resources: ResourceRef[];
   entityKind: EntityKind;
   focus: FocusTarget | null;
   onFocus: (target: FocusTarget) => void;
   onHover: (id: string | null) => void;
+};
+
+function fmtQty(value: number | null | undefined, unit: string | null | undefined): string {
+  if (value == null) return "—";
+  const u = (unit || "").toLowerCase();
+  if (u.includes("usd")) {
+    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+    if (value >= 1_000) return `$${Math.round(value / 1_000)}k`;
+    return `$${Math.round(value)}`;
+  }
+  if (u.includes("fte")) return `${value.toFixed(1)} FTE`;
+  if (!unit) return value.toFixed(2);
+  return `${Math.round(value)} ${unit}`;
+}
+
+const RESOURCE_KIND_GLYPH: Record<NonNullable<ResourceRef["kind"]>, string> = {
+  human: "◯",
+  technical: "▤",
+  financial: "$",
+  time: "⌛",
 };
 
 const STATUS_GLYPH: Record<Commitment["status"], string> = {
@@ -31,6 +53,7 @@ export function CommitmentList({
   commitments,
   goals,
   people,
+  resources,
   entityKind,
   focus,
   onFocus,
@@ -105,9 +128,22 @@ export function CommitmentList({
     });
   }, [people, personAgg]);
 
+  // Sort resources: over-allocated first (utilization desc), then
+  // anything with metrics, then bare entries. Lets the rail surface
+  // attention-worthy pools without the user opening the dashboard.
+  const sortedResources = useMemo(() => {
+    return [...resources].sort((a, b) => {
+      const ap = a.utilization_pct ?? -1;
+      const bp = b.utilization_pct ?? -1;
+      if (ap !== bp) return bp - ap;
+      return a.label.localeCompare(b.label);
+    });
+  }, [resources]);
+
   const showGoals = entityKind === "all" || entityKind === "goals";
   const showCommits = entityKind === "all" || entityKind === "commitments";
   const showPeople = entityKind === "all" || entityKind === "people";
+  const showResources = entityKind === "all" || entityKind === "resources";
 
   return (
     <aside className="commitment-list" aria-label="Goals and commitments">
@@ -226,6 +262,79 @@ export function CommitmentList({
                         “{lead.statement}”
                       </div>
                     ) : null}
+                  </div>
+                  <span className="cl-priority p-standard" />
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {showResources && sortedResources.length > 0 ? (
+        <section className="cl-section">
+          <header className="cl-section-head">
+            <span className="cl-territory-name">Resources</span>
+            <span className="cl-territory-count">{sortedResources.length}</span>
+          </header>
+          <ul className="cl-rows">
+            {sortedResources.map((r) => {
+              const isSelected = focus?.kind === "resource" && focus.id === r.id;
+              const pct = r.utilization_pct;
+              const health = r.health;
+              const barWidth = pct == null ? 0 : Math.min(100, Math.max(0, pct));
+              const overflow =
+                pct != null && pct > 100 ? Math.min(50, pct - 100) : 0;
+              return (
+                <li
+                  key={r.id}
+                  className={
+                    "cl-row cl-row-resource" + (isSelected ? " selected" : "")
+                  }
+                  onClick={() => onFocus({ kind: "resource", id: r.id })}
+                >
+                  <span className="cl-resource-glyph" aria-hidden>
+                    {RESOURCE_KIND_GLYPH[r.kind]}
+                  </span>
+                  <div className="cl-row-body">
+                    <div className="cl-row-line1">
+                      <span className="cl-label">{r.label}</span>
+                      {pct != null ? (
+                        <span className={"cl-resource-pct" + (health ? " health-" + health : "")}>
+                          {Math.round(pct)}%
+                        </span>
+                      ) : null}
+                    </div>
+                    {pct != null ? (
+                      <div className="cl-resource-bar" aria-hidden>
+                        <div
+                          className={
+                            "cl-resource-bar-fill" + (health ? " health-" + health : "")
+                          }
+                          style={{ width: barWidth + "%" }}
+                        />
+                        {overflow > 0 ? (
+                          <div
+                            className="cl-resource-bar-overflow"
+                            style={{ width: overflow + "%" }}
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="cl-row-line2">
+                      <span className="cl-resource-amount">
+                        {fmtQty(r.deployed, r.unit)} of {fmtQty(r.capacity, r.unit)}
+                      </span>
+                      {r.deployments_count != null ? (
+                        <>
+                          <span className="cl-sep">·</span>
+                          <span>
+                            {r.deployments_count} commit
+                            {r.deployments_count === 1 ? "" : "s"}
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                   <span className="cl-priority p-standard" />
                 </li>
