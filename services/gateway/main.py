@@ -1303,26 +1303,43 @@ def _register_routes(app: FastAPI) -> None:
         if auth is None:  # pragma: no cover
             return _unauth("missing_bearer")
 
+        # since_minutes=0 (or any non-positive) signals "return all
+        # active commitments for this tenant" — used by Structure.tsx
+        # on initial load so a freshly-loaded snapshot populates the
+        # full graph, not just the live-overlay window.
         try:
-            window_minutes = max(1, min(1440, int(since_minutes)))
+            raw_minutes = int(since_minutes)
         except (ValueError, TypeError):
-            window_minutes = 10
+            raw_minutes = 10
+        all_active = raw_minutes <= 0
+        window_minutes = max(1, min(1440 * 365, raw_minutes))
 
         deps = _deps(request)
         async with deps.pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id FROM commitments "
-                "WHERE tenant_id = $1 "
-                "  AND ( "
-                "    created_at >= now() - ($2 || ' minutes')::interval "
-                "    OR last_state_change_at >= now() - ($2 || ' minutes')::interval "
-                "  ) "
-                "  AND terminal_at IS NULL "
-                "ORDER BY last_state_change_at DESC NULLS LAST, "
-                "         created_at DESC "
-                "LIMIT 20",
-                auth.tenant_id, str(window_minutes),
-            )
+            if all_active:
+                rows = await conn.fetch(
+                    "SELECT id FROM commitments "
+                    "WHERE tenant_id = $1 "
+                    "  AND terminal_at IS NULL "
+                    "ORDER BY last_state_change_at DESC NULLS LAST, "
+                    "         created_at DESC "
+                    "LIMIT 500",
+                    auth.tenant_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT id FROM commitments "
+                    "WHERE tenant_id = $1 "
+                    "  AND ( "
+                    "    created_at >= now() - ($2 || ' minutes')::interval "
+                    "    OR last_state_change_at >= now() - ($2 || ' minutes')::interval "
+                    "  ) "
+                    "  AND terminal_at IS NULL "
+                    "ORDER BY last_state_change_at DESC NULLS LAST, "
+                    "         created_at DESC "
+                    "LIMIT 500",
+                    auth.tenant_id, str(window_minutes),
+                )
 
             commitments_payload: list[dict[str, Any]] = []
             goals_by_id: dict[str, dict[str, Any]] = {}
@@ -1355,10 +1372,12 @@ def _register_routes(app: FastAPI) -> None:
                 "LIMIT 80",
                 auth.tenant_id,
             )
+            # Always overwrite role with the actor-metadata-derived
+            # canonical role. The commitment-overlay path tags actors as
+            # "Owner"/"Contributor" relative to a commitment, but for
+            # the team list we want the actor's actual title.
             for ar in actor_rows:
                 aid = str(ar["id"])
-                if aid in people_by_id:
-                    continue
                 md = ar["metadata"]
                 if isinstance(md, str):
                     try:

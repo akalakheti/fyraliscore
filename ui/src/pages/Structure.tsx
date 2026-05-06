@@ -157,18 +157,22 @@ export default function Structure() {
   );
   const [overlayError, setOverlayError] = useState<string | null>(null);
 
-  // On mount and again every 8s while visible, pull commitments
-  // created in the recent past so auto-accepted ones (server-side
-  // create-commitment recommendations that fired without a click)
-  // surface in the relational view.
+  // On mount, pull every active commitment for the tenant so the
+  // graph reflects the loaded snapshot, not the SAMPLE_* placeholder
+  // graph. After that, every 8s while visible, fetch the last 15
+  // minutes' worth of changes so auto-accepted commitments surface
+  // without a manual reload.
   useEffect(() => {
     let alive = true;
-    async function fetchRecent() {
-      if (document.hidden) return;
+    let firstFetchDone = false;
+    async function fetchStructure(initial: boolean) {
+      if (!initial && document.hidden) return;
       try {
-        const res = await getStructureRecent(15);
+        // initial load: since_minutes=0 → all active commitments.
+        // subsequent polls: 15-minute window for live changes.
+        const res = await getStructureRecent(initial ? 0 : 15);
         if (!alive) return;
-        if (res.commitments.length === 0) return;
+        if (!initial && res.commitments.length === 0) return;
         setOverlayState((prev) =>
           mergeOverlayBundle(prev, {
             commitments: res.commitments,
@@ -180,10 +184,14 @@ export default function Structure() {
       } catch {
         // Surface only persistent failures; one-off transients shouldn't
         // be loud.
+      } finally {
+        firstFetchDone = true;
       }
     }
-    void fetchRecent();
-    const id = window.setInterval(fetchRecent, 8000);
+    void fetchStructure(true);
+    const id = window.setInterval(() => {
+      if (firstFetchDone) void fetchStructure(false);
+    }, 8000);
     return () => {
       alive = false;
       window.clearInterval(id);
@@ -257,51 +265,49 @@ export default function Structure() {
     return overlayState.people.map(adaptOverlayPerson);
   }, [overlayState.people]);
 
+  // When overlay has any data, the graph reflects the real tenant —
+  // SAMPLE_* is the no-API fallback for the static dev mode only.
+  const hasOverlayData =
+    overlayCommitments.length > 0 ||
+    overlayState.goals.length > 0 ||
+    overlayState.people.length > 0 ||
+    overlayState.customers.length > 0;
+
   const allCommitments = useMemo(() => {
-    if (overlayCommitments.length === 0) return SAMPLE_COMMITMENTS;
-    const known = new Set(SAMPLE_COMMITMENTS.map((c) => c.id));
-    const extras = overlayCommitments.filter((c) => !known.has(c.id));
-    return [...extras, ...SAMPLE_COMMITMENTS];
-  }, [overlayCommitments]);
+    if (hasOverlayData) return overlayCommitments;
+    return SAMPLE_COMMITMENTS;
+  }, [hasOverlayData, overlayCommitments]);
 
   const allGoals = useMemo(() => {
-    if (overlayState.goals.length === 0) return SAMPLE_GOALS;
-    const known = new Set(SAMPLE_GOALS.map((g) => g.id));
-    const extras = overlayState.goals.filter((g) => !known.has(g.id));
-    return [...SAMPLE_GOALS, ...extras];
-  }, [overlayState.goals]);
+    if (hasOverlayData) return overlayState.goals;
+    return SAMPLE_GOALS;
+  }, [hasOverlayData, overlayState.goals]);
 
   const allPeople = useMemo(() => {
-    if (overlayPeople.length === 0) return SAMPLE_PEOPLE;
-    const known = new Set(SAMPLE_PEOPLE.map((p) => p.id));
-    const extras = overlayPeople.filter((p) => !known.has(p.id));
-    return [...extras, ...SAMPLE_PEOPLE];
-  }, [overlayPeople]);
+    if (hasOverlayData) return overlayPeople;
+    return SAMPLE_PEOPLE;
+  }, [hasOverlayData, overlayPeople]);
 
   const allOwners = useMemo(() => {
-    if (overlayState.people.length === 0) return SAMPLE_OWNERS;
-    const known = new Set(SAMPLE_OWNERS.map((o) => o.id));
-    const extras = overlayState.people
-      .filter((p) => !known.has(p.id))
-      .map((p) => ({ id: p.id, label: p.label }));
-    return [...SAMPLE_OWNERS, ...extras];
-  }, [overlayState.people]);
+    if (hasOverlayData) {
+      return overlayState.people.map((p) => ({ id: p.id, label: p.label }));
+    }
+    return SAMPLE_OWNERS;
+  }, [hasOverlayData, overlayState.people]);
 
   const allCustomers = useMemo(() => {
-    if (overlayState.customers.length === 0) return SAMPLE_CUSTOMERS;
-    const known = new Set(SAMPLE_CUSTOMERS.map((c) => c.id));
-    const extras = overlayState.customers.filter((c) => !known.has(c.id));
-    return [...SAMPLE_CUSTOMERS, ...extras];
-  }, [overlayState.customers]);
+    if (hasOverlayData) return overlayState.customers;
+    return SAMPLE_CUSTOMERS;
+  }, [hasOverlayData, overlayState.customers]);
 
   const allPeopleIndex = useMemo(() => {
-    if (overlayPeople.length === 0) return SAMPLE_PEOPLE_INDEX;
-    const idx: Record<string, PersonProfile> = { ...SAMPLE_PEOPLE_INDEX };
-    for (const p of overlayPeople) {
-      if (!idx[p.id]) idx[p.id] = p;
+    if (hasOverlayData) {
+      const idx: Record<string, PersonProfile> = {};
+      for (const p of overlayPeople) idx[p.id] = p;
+      return idx;
     }
-    return idx;
-  }, [overlayPeople]);
+    return SAMPLE_PEOPLE_INDEX;
+  }, [hasOverlayData, overlayPeople]);
 
   const newestOverlayCommitment = overlayCommitments[0];
 
