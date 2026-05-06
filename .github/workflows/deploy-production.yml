@@ -1,0 +1,37 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to AWS Lightsail
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/fyraliscore
+
+            echo "==> Pulling latest code"
+            git fetch origin production
+            git reset --hard origin/production
+
+            echo "==> Rebuilding and restarting containers"
+            docker compose pull
+            docker compose up -d --build --remove-orphans
+
+            echo "==> Waiting for gateway health check"
+            timeout 60 bash -c 'until curl -sf http://localhost:8000/healthz; do sleep 3; done'
+
+            echo "==> Deployment complete"
+            docker compose ps
