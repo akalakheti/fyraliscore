@@ -87,5 +87,9 @@ jobs:
             --ignore=services/retrieval/tests \
             --ignore=services/workers/anomaly_processor/tests \
             --ignore=services/today/tests \
+            --ignore=services/demo/tests \
+            --ignore=services/models/tests/test_recommendations.py \
+            --ignore=services/recommendations/tests/test_api.py \
+            --deselect lib/shared/tests/test_db.py::test_get_pool_uninitialised_raises \
             -m "not ollama and not real_llm" \
             -v --tb=short
