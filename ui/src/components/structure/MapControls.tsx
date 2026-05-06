@@ -15,6 +15,8 @@ type Props = {
   ownerOptions: { id: string; label: string }[];
   customerOptions: { id: string; label: string }[];
   onFiltersChange: (f: Filters) => void;
+  listOpen?: boolean;
+  onToggleList?: () => void;
 };
 
 const STATUS_LABEL: Record<CommitmentStatus, string> = {
@@ -36,6 +38,8 @@ export function MapControls({
   ownerOptions,
   customerOptions,
   onFiltersChange,
+  listOpen,
+  onToggleList,
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -84,6 +88,18 @@ export function MapControls({
 
   return (
     <div className="map-controls" ref={wrapRef}>
+      {onToggleList ? (
+        <button
+          type="button"
+          className="control-toggle"
+          data-active={listOpen ? "true" : "false"}
+          aria-pressed={listOpen ? "true" : "false"}
+          title="Toggle list rail (L)"
+          onClick={onToggleList}
+        >
+          {listOpen ? "Hide list" : "Show list"}
+        </button>
+      ) : null}
       <div className="control-wrap">
         <button
           type="button"

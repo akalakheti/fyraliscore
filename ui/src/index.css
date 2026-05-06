@@ -3160,13 +3160,22 @@ a { color: inherit; text-decoration: none; }
  * ─────────────────────────────────────────────── */
 .relational-shell {
   display: grid;
-  grid-template-columns: minmax(360px, 38%) 1fr;
+  grid-template-columns: 0 1fr;
   gap: 0;
   flex: 1 1 0;
   min-height: 600px;
   height: calc(100vh - 60px);
   overflow: hidden;
   background: var(--base);
+  transition: grid-template-columns 240ms cubic-bezier(.2,.8,.2,1);
+}
+.relational-shell.list-open {
+  grid-template-columns: minmax(340px, 32%) 1fr;
+}
+.relational-shell:not(.list-open) .commitment-list {
+  border-right: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .commitment-list {
@@ -8147,7 +8156,7 @@ a.artifact-link:hover {
   top: 0;
   right: 0;
   height: 100vh;
-  width: min(380px, 90vw);
+  width: min(320px, 90vw);
   background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFC 100%);
   border-left: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: -16px 0 40px -16px rgba(15, 23, 42, 0.18);
@@ -8155,6 +8164,12 @@ a.artifact-link:hover {
   display: flex;
   flex-direction: column;
   animation: artifact-slide-in 200ms cubic-bezier(.2,.8,.2,1);
+}
+/* When the drawer is open, push the structure-main canvas left so the
+   graph stays fully visible — no overlap with the drawer's panel. */
+body:has(.artifact-drawer) .structure-main {
+  padding-right: min(320px, 90vw);
+  transition: padding-right 220ms cubic-bezier(.2,.8,.2,1);
 }
 @keyframes artifact-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes artifact-slide-in {

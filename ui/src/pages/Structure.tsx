@@ -163,6 +163,7 @@ export default function Structure() {
   const [focus, setFocus] = useState<FocusTarget | null>(null);
   const [hoveredCommitmentId, setHoveredCommitmentId] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
   const [overlayState, setOverlayState] = useState<OverlayState>(() =>
     emptyOverlayState()
   );
@@ -402,6 +403,10 @@ export default function Structure() {
         e.preventDefault();
         setShortcutsOpen(true);
       }
+      if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        setListOpen((v) => !v);
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -489,9 +494,11 @@ export default function Structure() {
             ownerOptions={allOwners}
             customerOptions={allCustomers}
             onFiltersChange={setFilters}
+            listOpen={listOpen}
+            onToggleList={() => setListOpen((v) => !v)}
           />
 
-          <div className="relational-shell">
+          <div className={"relational-shell" + (listOpen ? " list-open" : "")}>
             <CommitmentList
               commitments={visibleCommitments}
               goals={visibleGoals}
