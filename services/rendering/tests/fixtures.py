@@ -76,7 +76,7 @@ def acme_tuesday_snapshot() -> SubstrateSnapshot:
             revenue_at_risk="$487K",
         ),
         ResourceRef(
-            id="r-cust-northwind",
+            id="r-cust-pelago",
             kind="customer",
             name="Northwind",
             health="healthy",

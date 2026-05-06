@@ -90,12 +90,9 @@ async def start(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse({"error": "invalid_json"}, status_code=400)
     company_id = body.get("company_id") if isinstance(body, dict) else None
-    if not isinstance(company_id, str) or company_id not in (
-        "truss", "northwind", "meridian"
-    ):
+    if not isinstance(company_id, str) or company_id != "pelago":
         return JSONResponse(
-            {"error": "invalid_company_id",
-             "allowed": ["truss", "northwind", "meridian"]},
+            {"error": "invalid_company_id", "allowed": ["pelago"]},
             status_code=400,
         )
 
@@ -242,7 +239,7 @@ async def suggested_signals(request: Request) -> JSONResponse:
     if sess is None:
         return JSONResponse({"items": {}}, status_code=200)
     cfg = await get_demo_config_by_id(deps.pool, sess.demo_config_id)
-    company_id = cfg.company_id if cfg else "northwind"
+    company_id = cfg.company_id if cfg else "pelago"
     return JSONResponse(
         {"company_id": company_id, "tabs": list_suggested_signals(company_id)},
         status_code=200,
