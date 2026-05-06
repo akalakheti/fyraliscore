@@ -54,7 +54,14 @@ export type PersonProfile = {
   calibration: number;
 };
 
-export type GoalRef = { id: string; label: string; altitude: "strategic" | "operational" };
+export type GoalRef = {
+  id: string;
+  label: string;
+  altitude: "strategic" | "operational";
+  // null/absent for top-of-tree strategic goals; otherwise the id of
+  // the strategic parent this operational goal rolls up to.
+  parent_goal_id?: string | null;
+};
 export type DecisionRef = { id: string; label: string; state: "in-force" | "drifting" | "revisited" };
 export type ResourceKind = "financial" | "human" | "technical" | "time";
 export type ResourceRef = {
@@ -87,6 +94,17 @@ export type ActivityEntry = {
   desc: string;
 };
 
+// Per-commit slice of a consumed resource, populated by the gateway's
+// commitment overlay. Gives chips/side-panels the deployed quantity in
+// the resource's native unit without a separate fetch.
+export type CommitmentResourceSlice = {
+  id: string;
+  label: string;
+  kind: ResourceKind;
+  unit?: string | null;
+  deployed_quantity?: number | null;
+};
+
 export type Commitment = {
   id: string;
   label: string;
@@ -103,6 +121,7 @@ export type Commitment = {
   traces_to: string[]; // decision ids (legacy alias for constrained_by)
   related: string[]; // commitment ids
   edges?: CommitmentEdges;
+  consumed_resources?: CommitmentResourceSlice[];
   progress?: string;
   substrate_insight?: string;
   activity: ActivityEntry[];

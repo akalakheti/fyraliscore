@@ -551,7 +551,7 @@ function CommitmentFocus({
       .map((id) => resourceIndex.get(id))
       .filter(Boolean) as ResourceRef[];
     const order: Record<ResourceRef["kind"], number> = {
-      financial: 0, human: 1, technical: 2,
+      financial: 0, human: 1, technical: 2, time: 3,
     };
     return list.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
   }, [c, resourceIndex]);
@@ -634,20 +634,30 @@ function CommitmentFocus({
           onClick={() => onFocus({ kind: "decision", id: d.id })}
         />
       ))}
-      {res.map((r, i) => (
-        <ChipNode
-          key={"n-r-" + r.id}
-          x={resourcePos[i].x2}
-          y={resourcePos[i].y2}
-          label={r.label}
-          sub={r.kind}
-          kind="resource"
-          glyph="▤"
-          width={chipW}
-          height={chipH}
-          onClick={() => onFocus({ kind: "resource", id: r.id })}
-        />
-      ))}
+      {res.map((r, i) => {
+        // Per-commit deployed quantity, when known. Lets the chip
+        // surface "Engineering pod · 0.4 FTE" instead of the bare
+        // resource kind.
+        const slice = (c.consumed_resources ?? []).find((s) => s.id === r.id);
+        const sliceText =
+          slice && slice.deployed_quantity != null
+            ? formatResourceQty(slice.deployed_quantity, slice.unit ?? r.unit ?? null)
+            : null;
+        return (
+          <ChipNode
+            key={"n-r-" + r.id}
+            x={resourcePos[i].x2}
+            y={resourcePos[i].y2}
+            label={r.label}
+            sub={sliceText ?? r.kind}
+            kind="resource"
+            glyph="▤"
+            width={chipW}
+            height={chipH}
+            onClick={() => onFocus({ kind: "resource", id: r.id })}
+          />
+        );
+      })}
       {peopleIds.map((p, i) => (
         <ChipNode
           key={"n-p-" + p}

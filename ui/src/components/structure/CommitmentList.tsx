@@ -5,38 +5,16 @@ import type {
   FocusTarget,
   GoalRef,
   PersonProfile,
-  ResourceRef,
 } from "./types";
 
 type Props = {
   commitments: Commitment[];
   goals: GoalRef[];
   people: PersonProfile[];
-  resources: ResourceRef[];
   entityKind: EntityKind;
   focus: FocusTarget | null;
   onFocus: (target: FocusTarget) => void;
   onHover: (id: string | null) => void;
-};
-
-function fmtQty(value: number | null | undefined, unit: string | null | undefined): string {
-  if (value == null) return "—";
-  const u = (unit || "").toLowerCase();
-  if (u.includes("usd")) {
-    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-    if (value >= 1_000) return `$${Math.round(value / 1_000)}k`;
-    return `$${Math.round(value)}`;
-  }
-  if (u.includes("fte")) return `${value.toFixed(1)} FTE`;
-  if (!unit) return value.toFixed(2);
-  return `${Math.round(value)} ${unit}`;
-}
-
-const RESOURCE_KIND_GLYPH: Record<NonNullable<ResourceRef["kind"]>, string> = {
-  human: "◯",
-  technical: "▤",
-  financial: "$",
-  time: "⌛",
 };
 
 const STATUS_GLYPH: Record<Commitment["status"], string> = {
@@ -53,7 +31,6 @@ export function CommitmentList({
   commitments,
   goals,
   people,
-  resources,
   entityKind,
   focus,
   onFocus,
@@ -84,17 +61,74 @@ export function CommitmentList({
     });
   }, [commitments]);
 
-  // Sort goals: strategic before operational, then by off-track count.
-  const sortedGoals = useMemo(() => {
-    return [...goals].sort((a, b) => {
-      if (a.altitude !== b.altitude) {
-        return a.altitude === "strategic" ? -1 : 1;
+  // Build the goal tree: strategic at the top, operational children
+  // grouped under their parent, orphan operationals (no parent) at the
+  // end. Strategic agg rolls up its operational children's totals so
+  // the parent row shows the full load, not just direct contributes_to
+  // (which strategics rarely have).
+  type GoalTreeRow = {
+    goal: GoalRef;
+    children: GoalRef[];
+    agg: { total: number; off: number };
+  };
+  const goalTree = useMemo<GoalTreeRow[]>(() => {
+    const byId = new Map(goals.map((g) => [g.id, g]));
+    const childrenByParent = new Map<string, GoalRef[]>();
+    const strategicGoals: GoalRef[] = [];
+    const orphanOperational: GoalRef[] = [];
+    for (const g of goals) {
+      if (g.altitude === "strategic") {
+        strategicGoals.push(g);
+      } else if (g.parent_goal_id && byId.has(g.parent_goal_id)) {
+        const list = childrenByParent.get(g.parent_goal_id) ?? [];
+        list.push(g);
+        childrenByParent.set(g.parent_goal_id, list);
+      } else {
+        orphanOperational.push(g);
       }
-      const aOff = goalAgg.get(a.id)?.off ?? 0;
-      const bOff = goalAgg.get(b.id)?.off ?? 0;
-      return bOff - aOff;
+    }
+    function rolledAgg(g: GoalRef, children: GoalRef[]) {
+      const own = goalAgg.get(g.id) ?? { total: 0, off: 0 };
+      let total = own.total;
+      let off = own.off;
+      for (const ch of children) {
+        const a = goalAgg.get(ch.id) ?? { total: 0, off: 0 };
+        total += a.total;
+        off += a.off;
+      }
+      return { total, off };
+    }
+    function sortChildren(arr: GoalRef[]) {
+      return [...arr].sort((a, b) => {
+        const ao = goalAgg.get(a.id)?.off ?? 0;
+        const bo = goalAgg.get(b.id)?.off ?? 0;
+        if (ao !== bo) return bo - ao;
+        return a.label.localeCompare(b.label);
+      });
+    }
+    const rows: GoalTreeRow[] = [];
+    const sortedStrategic = [...strategicGoals].sort((a, b) => {
+      const ac = childrenByParent.get(a.id) ?? [];
+      const bc = childrenByParent.get(b.id) ?? [];
+      const aa = rolledAgg(a, ac);
+      const bb = rolledAgg(b, bc);
+      if (aa.off !== bb.off) return bb.off - aa.off;
+      return a.label.localeCompare(b.label);
     });
+    for (const s of sortedStrategic) {
+      const ch = sortChildren(childrenByParent.get(s.id) ?? []);
+      rows.push({ goal: s, children: ch, agg: rolledAgg(s, ch) });
+    }
+    for (const o of sortChildren(orphanOperational)) {
+      rows.push({
+        goal: o,
+        children: [],
+        agg: goalAgg.get(o.id) ?? { total: 0, off: 0 },
+      });
+    }
+    return rows;
   }, [goals, goalAgg]);
+  const goalCount = goals.length;
 
   // Per-person aggregates derived from currently-visible commitments,
   // so the Team rail reacts to active filters (owner/customer/time/status).
@@ -128,22 +162,9 @@ export function CommitmentList({
     });
   }, [people, personAgg]);
 
-  // Sort resources: over-allocated first (utilization desc), then
-  // anything with metrics, then bare entries. Lets the rail surface
-  // attention-worthy pools without the user opening the dashboard.
-  const sortedResources = useMemo(() => {
-    return [...resources].sort((a, b) => {
-      const ap = a.utilization_pct ?? -1;
-      const bp = b.utilization_pct ?? -1;
-      if (ap !== bp) return bp - ap;
-      return a.label.localeCompare(b.label);
-    });
-  }, [resources]);
-
   const showGoals = entityKind === "all" || entityKind === "goals";
   const showCommits = entityKind === "all" || entityKind === "commitments";
   const showPeople = entityKind === "all" || entityKind === "people";
-  const showResources = entityKind === "all" || entityKind === "resources";
 
   return (
     <aside className="commitment-list" aria-label="Goals and commitments">
@@ -151,50 +172,105 @@ export function CommitmentList({
         <section className="cl-section">
           <header className="cl-section-head">
             <span className="cl-territory-name">Goals</span>
-            <span className="cl-territory-count">{sortedGoals.length}</span>
+            <span className="cl-territory-count">{goalCount}</span>
           </header>
           <ul className="cl-rows">
-            {sortedGoals.map((g) => {
-              const agg = goalAgg.get(g.id) ?? { total: 0, off: 0 };
+            {goalTree.flatMap((row) => {
+              const g = row.goal;
+              const agg = row.agg;
               const isSelected = focus?.kind === "goal" && focus.id === g.id;
-              return (
-                <li
-                  key={g.id}
-                  className={
-                    "cl-row cl-row-goal" + (isSelected ? " selected" : "")
-                  }
-                  onClick={() => onFocus({ kind: "goal", id: g.id })}
-                >
-                  <span
+              const items: JSX.Element[] = [];
+              items.push(
+                  <li
+                    key={g.id}
                     className={
-                      "cl-goal-glyph" +
-                      (g.altitude === "strategic" ? " strategic" : " operational")
+                      "cl-row cl-row-goal" +
+                      (isSelected ? " selected" : "") +
+                      (row.children.length > 0 ? " parent" : "")
                     }
-                    aria-hidden
+                    onClick={() => onFocus({ kind: "goal", id: g.id })}
                   >
-                    ◆
-                  </span>
-                  <div className="cl-row-body">
-                    <div className="cl-row-line1">
-                      <span className="cl-label">{g.label}</span>
+                    <span
+                      className={
+                        "cl-goal-glyph" +
+                        (g.altitude === "strategic" ? " strategic" : " operational")
+                      }
+                      aria-hidden
+                    >
+                      ◆
+                    </span>
+                    <div className="cl-row-body">
+                      <div className="cl-row-line1">
+                        <span className="cl-label">{g.label}</span>
+                      </div>
+                      <div className="cl-row-line2">
+                        <span className="cl-altitude">{g.altitude}</span>
+                        {row.children.length > 0 ? (
+                          <>
+                            <span className="cl-sep">·</span>
+                            <span className="cl-goal-count">
+                              {row.children.length} sub-goal
+                              {row.children.length === 1 ? "" : "s"}
+                            </span>
+                          </>
+                        ) : null}
+                        <span className="cl-sep">·</span>
+                        <span className="cl-goal-count">
+                          {agg.total} commitment{agg.total === 1 ? "" : "s"}
+                        </span>
+                        {agg.off > 0 ? (
+                          <>
+                            <span className="cl-sep">·</span>
+                            <span className="cl-goal-off">{agg.off} off-track</span>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="cl-row-line2">
-                      <span className="cl-altitude">{g.altitude}</span>
-                      <span className="cl-sep">·</span>
-                      <span className="cl-goal-count">
-                        {agg.total} commitment{agg.total === 1 ? "" : "s"}
-                      </span>
-                      {agg.off > 0 ? (
-                        <>
-                          <span className="cl-sep">·</span>
-                          <span className="cl-goal-off">{agg.off} off-track</span>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                  <span className="cl-priority p-standard" />
-                </li>
+                    <span className="cl-priority p-standard" />
+                  </li>
               );
+              for (const ch of row.children) {
+                const cAgg = goalAgg.get(ch.id) ?? { total: 0, off: 0 };
+                const cSelected =
+                  focus?.kind === "goal" && focus.id === ch.id;
+                items.push(
+                  <li
+                    key={ch.id}
+                    className={
+                      "cl-row cl-row-goal cl-row-goal-sub" +
+                      (cSelected ? " selected" : "")
+                    }
+                    onClick={() => onFocus({ kind: "goal", id: ch.id })}
+                  >
+                    <span className="cl-goal-glyph operational" aria-hidden>
+                      ◇
+                    </span>
+                    <div className="cl-row-body">
+                      <div className="cl-row-line1">
+                        <span className="cl-label">{ch.label}</span>
+                      </div>
+                      <div className="cl-row-line2">
+                        <span className="cl-altitude">sub-goal</span>
+                        <span className="cl-sep">·</span>
+                        <span className="cl-goal-count">
+                          {cAgg.total} commitment
+                          {cAgg.total === 1 ? "" : "s"}
+                        </span>
+                        {cAgg.off > 0 ? (
+                          <>
+                            <span className="cl-sep">·</span>
+                            <span className="cl-goal-off">
+                              {cAgg.off} off-track
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    <span className="cl-priority p-standard" />
+                  </li>
+                );
+              }
+              return items;
             })}
           </ul>
         </section>
@@ -262,79 +338,6 @@ export function CommitmentList({
                         “{lead.statement}”
                       </div>
                     ) : null}
-                  </div>
-                  <span className="cl-priority p-standard" />
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ) : null}
-
-      {showResources && sortedResources.length > 0 ? (
-        <section className="cl-section">
-          <header className="cl-section-head">
-            <span className="cl-territory-name">Resources</span>
-            <span className="cl-territory-count">{sortedResources.length}</span>
-          </header>
-          <ul className="cl-rows">
-            {sortedResources.map((r) => {
-              const isSelected = focus?.kind === "resource" && focus.id === r.id;
-              const pct = r.utilization_pct;
-              const health = r.health;
-              const barWidth = pct == null ? 0 : Math.min(100, Math.max(0, pct));
-              const overflow =
-                pct != null && pct > 100 ? Math.min(50, pct - 100) : 0;
-              return (
-                <li
-                  key={r.id}
-                  className={
-                    "cl-row cl-row-resource" + (isSelected ? " selected" : "")
-                  }
-                  onClick={() => onFocus({ kind: "resource", id: r.id })}
-                >
-                  <span className="cl-resource-glyph" aria-hidden>
-                    {RESOURCE_KIND_GLYPH[r.kind]}
-                  </span>
-                  <div className="cl-row-body">
-                    <div className="cl-row-line1">
-                      <span className="cl-label">{r.label}</span>
-                      {pct != null ? (
-                        <span className={"cl-resource-pct" + (health ? " health-" + health : "")}>
-                          {Math.round(pct)}%
-                        </span>
-                      ) : null}
-                    </div>
-                    {pct != null ? (
-                      <div className="cl-resource-bar" aria-hidden>
-                        <div
-                          className={
-                            "cl-resource-bar-fill" + (health ? " health-" + health : "")
-                          }
-                          style={{ width: barWidth + "%" }}
-                        />
-                        {overflow > 0 ? (
-                          <div
-                            className="cl-resource-bar-overflow"
-                            style={{ width: overflow + "%" }}
-                          />
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="cl-row-line2">
-                      <span className="cl-resource-amount">
-                        {fmtQty(r.deployed, r.unit)} of {fmtQty(r.capacity, r.unit)}
-                      </span>
-                      {r.deployments_count != null ? (
-                        <>
-                          <span className="cl-sep">·</span>
-                          <span>
-                            {r.deployments_count} commit
-                            {r.deployments_count === 1 ? "" : "s"}
-                          </span>
-                        </>
-                      ) : null}
-                    </div>
                   </div>
                   <span className="cl-priority p-standard" />
                 </li>

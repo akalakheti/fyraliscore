@@ -71,6 +71,7 @@ export type StructureOverlayGoal = {
   id: string;
   label: string;
   altitude: "strategic" | "operational";
+  parent_goal_id?: string | null;
 };
 
 export type StructureOverlayPerson = {

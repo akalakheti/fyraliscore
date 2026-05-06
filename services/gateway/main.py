@@ -1377,6 +1377,37 @@ def _register_routes(app: FastAPI) -> None:
                             "unit": rs.get("unit"),
                         }
 
+            # Always include the tenant's full active goal tree so
+            # strategic parents (which usually have no direct commits)
+            # still show up alongside the commit-linked operational
+            # goals — needed for the goal hierarchy in the list rail
+            # and aggregate graph.
+            goal_all_rows = await conn.fetch(
+                "SELECT id, title, altitude, parent_goal_id FROM goals "
+                "WHERE tenant_id = $1 AND archived_at IS NULL "
+                "ORDER BY altitude, title "
+                "LIMIT 200",
+                auth.tenant_id,
+            )
+            for gr in goal_all_rows:
+                gid = str(gr["id"])
+                if gid in goals_by_id:
+                    # Already merged via commitment overlay — leave it
+                    # untouched (carries the same parent_goal_id).
+                    continue
+                altitude = (
+                    gr["altitude"] if gr["altitude"] in ("strategic", "operational")
+                    else "operational"
+                )
+                goals_by_id[gid] = {
+                    "id": gid,
+                    "label": gr["title"],
+                    "altitude": altitude,
+                    "parent_goal_id": (
+                        str(gr["parent_goal_id"]) if gr["parent_goal_id"] else None
+                    ),
+                }
+
             # Always include the tenant's full active human roster so
             # the Structure Team section reflects real DB actors, not
             # only the people tied to recent commitments.
@@ -2338,7 +2369,7 @@ async def _fetch_commitment_overlay(
         )
 
     goal_rows = await conn.fetch(
-        "SELECT g.id, g.title, g.altitude FROM goals g "
+        "SELECT g.id, g.title, g.altitude, g.parent_goal_id FROM goals g "
         "JOIN contributes_to ct ON ct.goal_id = g.id "
         "WHERE ct.commitment_id = $1 AND g.tenant_id = $2",
         cid, tenant_id,
@@ -2521,6 +2552,9 @@ async def _fetch_commitment_overlay(
             "id": str(g["id"]),
             "label": g["title"],
             "altitude": altitude,
+            "parent_goal_id": (
+                str(g["parent_goal_id"]) if g["parent_goal_id"] else None
+            ),
         })
 
     people_payload: list[dict[str, Any]] = []

@@ -139,6 +139,13 @@ function adaptOverlayCommitment(
       consumes: c.edges.consumes,
       contributors: c.edges.contributors,
     },
+    consumed_resources: (c.consumed_resources ?? []).map((r) => ({
+      id: r.id,
+      label: r.label,
+      kind: r.kind,
+      unit: r.unit ?? null,
+      deployed_quantity: r.deployed_quantity ?? null,
+    })),
     progress: undefined,
     substrate_insight: c.substrate_insight ?? undefined,
     activity: c.activity && c.activity.length > 0
@@ -617,7 +624,6 @@ export default function Structure() {
               commitments={visibleCommitments}
               goals={visibleGoals}
               people={visiblePeople}
-              resources={allResources}
               entityKind={filters.entityKind}
               focus={focus}
               onFocus={setFocus}

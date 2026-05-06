@@ -3299,8 +3299,37 @@ a { color: inherit; text-decoration: none; }
 .cl-priority.p-low { background: var(--ink-5); }
 .cl-priority.p-standard { background: var(--ink-4); }
 
-/* Goal rows in the left list */
+/* Goal rows in the left list. Strategic goals are flush; operational
+ * sub-goals indent and ride a thin guide rail so the hierarchy reads
+ * as a tree rather than a flat list. */
 .cl-row-goal { grid-template-columns: 18px 1fr 6px; }
+.cl-row-goal.parent .cl-label { font-weight: 600; }
+.cl-row-goal-sub {
+  padding-left: 22px;
+  position: relative;
+}
+.cl-row-goal-sub::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(15, 23, 42, 0.10);
+}
+.cl-row-goal-sub::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 16px;
+  width: 8px;
+  height: 1px;
+  background: rgba(15, 23, 42, 0.18);
+}
+.cl-row-goal-sub .cl-label {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
 .cl-goal-glyph {
   align-self: center;
   font-size: 13px;
@@ -3684,6 +3713,285 @@ a { color: inherit; text-decoration: none; }
   color: #1E40AF;
   font-family: var(--mono);
   letter-spacing: 0.04em;
+}
+
+/* ───────────────────────────────────────────────
+ * Structure left rail — Resources section.
+ * Each row carries a utilization bar plus a deployed/capacity sub-line.
+ * Health colors: green (deployed) → amber (constrained) → red (over).
+ * ─────────────────────────────────────────────── */
+.cl-row-resource { grid-template-columns: 18px 1fr 6px; }
+.cl-resource-glyph {
+  align-self: center;
+  font-size: 13px;
+  line-height: 1;
+  color: #1E40AF;
+  text-align: center;
+}
+.cl-resource-pct {
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.cl-resource-pct.health-over-allocated { color: var(--critical, #B91C1C); }
+.cl-resource-pct.health-constrained    { color: var(--high, #B45309); }
+.cl-resource-pct.health-deployed       { color: #166534; }
+.cl-resource-pct.health-under-utilized { color: var(--ink-3); }
+.cl-resource-pct.health-available      { color: var(--ink-3); }
+.cl-resource-bar {
+  position: relative;
+  margin: 5px 0 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  overflow: hidden;
+  display: flex;
+}
+.cl-resource-bar-fill {
+  height: 100%;
+  background: #166534;
+  border-radius: 999px;
+  transition: width 240ms ease;
+}
+.cl-resource-bar-fill.health-constrained    { background: var(--high, #B45309); }
+.cl-resource-bar-fill.health-over-allocated { background: var(--critical, #B91C1C); }
+.cl-resource-bar-fill.health-under-utilized { background: rgba(30, 64, 175, 0.55); }
+.cl-resource-bar-fill.health-available      { background: rgba(15, 23, 42, 0.20); }
+.cl-resource-bar-overflow {
+  height: 100%;
+  background: var(--critical, #B91C1C);
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  opacity: 0.85;
+  border-radius: 999px;
+}
+.cl-resource-amount {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* In-graph resource utilization bar (resource side panel). */
+.rg-resource-bar {
+  position: relative;
+  height: 6px;
+  margin: 8px 0 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  display: flex;
+}
+.rg-resource-bar-fill {
+  height: 100%;
+  background: #166534;
+  border-radius: 999px;
+  transition: width 240ms ease;
+}
+.rg-resource-bar-fill.warn { background: var(--high, #B45309); }
+.rg-resource-bar-fill.over { background: var(--critical, #B91C1C); }
+.rg-resource-bar-over {
+  height: 100%;
+  background: var(--critical, #B91C1C);
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  opacity: 0.85;
+}
+
+/* ───────────────────────────────────────────────
+ * Resource portfolio aggregate dashboard
+ * Shown when entityKind = "resources" and no focus.
+ * ─────────────────────────────────────────────── */
+.resource-agg {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 22px 28px 36px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.6) 0%, transparent 240px);
+}
+.resource-agg-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.resource-agg-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.resource-agg-callouts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 18px 0 24px;
+}
+.resource-callout {
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--rule-faint);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.resource-callout h4 {
+  margin: 0 0 4px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.resource-callout-warn h4        { color: var(--critical, #B91C1C); }
+.resource-callout-caution h4     { color: var(--high, #B45309); }
+.resource-callout-opportunity h4 { color: #166534; }
+.resource-callout-warn        { border-top: 3px solid var(--critical, #B91C1C); }
+.resource-callout-caution     { border-top: 3px solid var(--high, #B45309); }
+.resource-callout-opportunity { border-top: 3px solid #166534; }
+.resource-callout-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+.resource-callout ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.resource-callout-link {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+}
+.resource-callout-link:hover { border-bottom-color: var(--rule-faint); }
+.resource-callout-pct {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.resource-agg-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.resource-agg-group h3 {
+  margin: 0 0 8px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.resource-agg-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.resource-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--rule-faint);
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--sans);
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+.resource-row:hover {
+  border-color: rgba(15, 23, 42, 0.18);
+  transform: translateY(-1px);
+}
+.resource-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.resource-row-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.resource-row-health {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.resource-row-health-over-allocated { background: rgba(185, 28, 28, 0.10); color: var(--critical, #B91C1C); }
+.resource-row-health-constrained    { background: rgba(180, 83, 9, 0.10);  color: var(--high, #B45309); }
+.resource-row-health-deployed       { background: rgba(22, 101, 52, 0.10); color: #166534; }
+.resource-row-health-under-utilized { background: rgba(30, 64, 175, 0.10); color: #1E40AF; }
+.resource-row-health-available      { background: rgba(15, 23, 42, 0.06);  color: var(--ink-3); }
+.resource-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.resource-row-pct {
+  font-family: var(--mono);
+  color: var(--ink-2);
+}
+.resource-row-bar {
+  position: relative;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  display: flex;
+}
+.resource-row-bar-fill {
+  height: 100%;
+  background: #166534;
+  border-radius: 999px;
+  transition: width 240ms ease;
+}
+.resource-row-bar-constrained    { background: var(--high, #B45309); }
+.resource-row-bar-over-allocated { background: var(--critical, #B91C1C); }
+.resource-row-bar-under-utilized { background: rgba(30, 64, 175, 0.55); }
+.resource-row-bar-available      { background: rgba(15, 23, 42, 0.20); }
+.resource-row-bar-overflow {
+  height: 100%;
+  background: var(--critical, #B91C1C);
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  opacity: 0.85;
 }
 
 /* ───────────────────────────────────────────────
