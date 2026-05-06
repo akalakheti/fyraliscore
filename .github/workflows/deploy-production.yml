@@ -36,7 +36,14 @@ jobs:
             docker compose up -d --build --remove-orphans
 
             echo "==> Waiting for gateway health check"
-            if ! timeout 90 bash -c 'until curl -sf http://localhost:8000/healthz; do sleep 3; done'; then
+            # Gateway uses `expose: 8000` (compose-network only) — host
+            # port 8000 is not bound, so a host-side curl always fails
+            # even when the gateway is healthy. Probe via the gateway
+            # container's own loopback using Python's stdlib (already
+            # in the image; avoids depending on curl/wget being
+            # installed in the runtime image).
+            HEALTHCHECK_CMD='python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8000/healthz\",timeout=5).status==200 else 1)"'
+            if ! timeout 90 bash -c "until docker compose exec -T gateway sh -c '${HEALTHCHECK_CMD}' >/dev/null 2>&1; do sleep 3; done"; then
               echo "==> Health check FAILED — capturing container logs before rollback"
               echo "----- gateway logs (last 200 lines) -----"
               docker compose logs gateway --tail=200 || true
