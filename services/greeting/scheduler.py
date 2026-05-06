@@ -437,7 +437,7 @@ class GreetingScheduler:
             await self._cache.set_cached(
                 tenant_id, key, payload, reason=reason
             )
-
+    
         # 6. Publish updates on the WS stream if a publisher is wired.
         if self._publisher is not None:
             await self._publish_many(
