@@ -63,10 +63,6 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    # Remaining deselects: bucket 3 (flaky in full-suite runs, pass in
-    # isolation). Likely shared-DB ordering / async teardown timing.
-    "--deselect=services/realtime/tests/test_dispatcher.py::test_replay_since_sequence_num_ordered",
-    "--deselect=services/today/tests/test_today_api.py::test_today_returns_full_payload_for_actor_with_no_recommendations",
 ]
 markers = [
     "integration: requires live Postgres (DATABASE_URL)",
