@@ -67,28 +67,30 @@ export default function DemoLanding() {
   // Auto-start the Pelago session whenever there's no active session.
   // Re-runs on `retryToken` bumps so the user can recover from a
   // transient backend failure without reloading the page.
+  //
+  // No `alive`/cancel flag here: under React 18 StrictMode the effect
+  // mounts → unmounts → mounts again in dev. A cancel-flag pattern
+  // would mark the first request as cancelled and the second mount
+  // would short-circuit on `startInFlight`, leaving the resolved
+  // session payload nowhere to land. Letting both invocations share
+  // the in-flight promise (and absorbing one stray setState on a
+  // discarded instance) is the simpler correct shape.
   useEffect(() => {
     if (sessionId) return;
     if (startInFlight.current) return;
-    let alive = true;
     startInFlight.current = true;
     setStartError(null);
     (async () => {
       try {
         const session = await startDemoSession(DEFAULT_DEMO_COMPANY_ID);
-        if (!alive) return;
         saveDemoSession(session);
         setSessionId(session.session_id);
       } catch (err) {
-        if (!alive) return;
         setStartError(err instanceof Error ? err.message : "start failed");
       } finally {
         startInFlight.current = false;
       }
     })();
-    return () => {
-      alive = false;
-    };
   }, [sessionId, retryToken]);
 
   if (!sessionId) {
