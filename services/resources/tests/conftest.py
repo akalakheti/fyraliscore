@@ -94,6 +94,7 @@ async def resources_db() -> AsyncGenerator[asyncpg.Pool, None]:
         migration_files = sorted((REPO_ROOT / "db" / "migrations").glob("*.sql"))
         for path in migration_files:
             await conn.execute(path.read_text())
+        # Skip `demo_configs` — seeded by migration only. See root conftest.
         rows = await conn.fetch(
             """
             SELECT c.relname FROM pg_class c
@@ -101,6 +102,7 @@ async def resources_db() -> AsyncGenerator[asyncpg.Pool, None]:
             WHERE n.nspname = 'public'
               AND c.relkind IN ('r', 'p')
               AND c.relispartition = FALSE
+              AND c.relname <> 'demo_configs'
             """
         )
         tables = [r["relname"] for r in rows]

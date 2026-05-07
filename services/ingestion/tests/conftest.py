@@ -97,6 +97,7 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
 
 
 async def _truncate_all(conn: asyncpg.Connection) -> None:
+    # Skip `demo_configs` — seeded by migration only. See root conftest.
     rows = await conn.fetch(
         """
         SELECT c.relname FROM pg_class c
@@ -104,6 +105,7 @@ async def _truncate_all(conn: asyncpg.Connection) -> None:
         WHERE n.nspname = 'public'
           AND c.relkind IN ('r', 'p')
           AND c.relispartition = FALSE
+          AND c.relname <> 'demo_configs'
         """
     )
     tables = [r["relname"] for r in rows]
