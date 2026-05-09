@@ -309,10 +309,12 @@ Trying to overload either existing table would either (a) bloat its schema with 
 
 ### Implementation references
 
-- PR 1 — see [V1_PR_PROMPTS.md PR 1](../../V1_PR_PROMPTS.md). First v1 PR.
-- Schema: new migration creating `audit_events` (PR 1).
-- Code: `services/think/audit.py` (new module), `services/models/repo.py` emission points.
-- API: `get_audit_chain(model_id) -> List[AuditEvent]`.
+- PR 1 — landed.
+- Schema: [db/migrations/0030_audit_events.sql](../../db/migrations/0030_audit_events.sql).
+- Code: [services/think/audit.py](audit.py); emission points in [services/models/repo.py](../models/repo.py) (`insert`, `archive`, `bulk_confidence_update`) and [services/think/applier.py](applier.py) `_apply_claim_op` (`field_update` and `reconciliation_merge` paths).
+- Public API: `emit_audit_event`, `get_audit_chain`, `find_re_assertable_event`, `model_state_snapshot`, `emit_reconciliation_merge_audit` — all in [services/think/audit.py](audit.py).
+- Cause-type vocabulary: `create`, `archive`, `field_update`, `confidence_update`, `reconciliation_merge` — enforced by both the migration's CHECK constraint and `_CAUSE_TYPES` in audit.py.
+- Tests: [tests/synthesis_harness/cases_audit_chain.py](../../tests/synthesis_harness/cases_audit_chain.py) (15 scenarios spanning basic emission, reversal-of-reversal, reconciliation-merge audit union, chain ordering, cause linkage, multi-tenant isolation).
 
 ### Interactions
 

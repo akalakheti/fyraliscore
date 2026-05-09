@@ -97,6 +97,12 @@ from services.models.falsifier import is_adequate_falsifier
 from services.models.propositions import validate_proposition
 from services.models.recommendations import validate_recommendation
 from services.observations.state_change import emit_state_change
+# NOTE: audit module is imported lazily inside the methods that use it.
+# Importing services.think.audit at module-load time triggers
+# services/think/__init__.py, which imports reason.py → retrieval →
+# services.models.repo (this module). The circular import is benign at
+# call time but fatal at module-load. The lazy imports below break the
+# cycle without restructuring the package surface.
 
 
 # ---------------------------------------------------------------------
@@ -695,6 +701,26 @@ class ModelsRepo:
             },
         )
 
+        # 8b. Emit audit_events row (PR 1, Q5). Full snapshot as
+        # new_state since this is the chain root for this Model.
+        from services.think.audit import (  # noqa: WPS433 — see module top
+            CAUSE_CREATE,
+            emit_audit_event,
+            model_state_snapshot,
+        )
+        snapshot = model_state_snapshot(hydrated)
+        await emit_audit_event(
+            conn,
+            model_id=hydrated.id,
+            tenant_id=hydrated.tenant_id,
+            cause_type=CAUSE_CREATE,
+            new_state=snapshot,
+            previous_state=None,
+            cause_id=hydrated.born_from_event_id,
+            changed_fields=sorted(snapshot.keys()),
+            detect_re_assert=False,  # creates have no prior to re-assert
+        )
+
         # Demo SSE: notify any open action-list streams for this actor
         # that a new recommendation has landed. No-op outside demo
         # mode (publish is a fan-out to in-process subscribers; if no
@@ -840,6 +866,20 @@ class ModelsRepo:
         """
         async def _run(c: asyncpg.Connection) -> ModelRow:
             await _ensure_vector_codec(c)
+            # Fetch pre-archive state for the audit event. SELECT inside
+            # the transaction; the subsequent UPDATE serialises with
+            # other writers via the row lock acquired by UPDATE.
+            pre_row = await c.fetchrow(
+                f"SELECT {_SELECT_COLS_SQL} FROM models WHERE id = $1",
+                model_id,
+            )
+            if pre_row is None:
+                raise ValidationError(
+                    f"model {model_id} not found",
+                    model_id=str(model_id),
+                )
+            pre_hydrated = _hydrate_row(pre_row)
+
             row = await c.fetchrow(
                 f"""
                 UPDATE models
@@ -905,6 +945,32 @@ class ModelsRepo:
                     "dependent_count": len(dep_ids),
                     "reeval_cause_kind": cause_kind,
                 },
+            )
+
+            # Audit event: partial snapshots of the fields that
+            # changed. status/archive_reason are the legible diff.
+            from services.think.audit import (  # noqa: WPS433
+                CAUSE_ARCHIVE,
+                diff_changed_fields,
+                emit_audit_event,
+            )
+            previous_state = {
+                "status": pre_hydrated.status,
+                "archive_reason": pre_hydrated.archive_reason,
+            }
+            new_state = {
+                "status": hydrated.status,
+                "archive_reason": hydrated.archive_reason,
+            }
+            await emit_audit_event(
+                c,
+                model_id=hydrated.id,
+                tenant_id=hydrated.tenant_id,
+                cause_type=CAUSE_ARCHIVE,
+                new_state=new_state,
+                previous_state=previous_state,
+                cause_id=cause_event_id,
+                changed_fields=diff_changed_fields(previous_state, new_state),
             )
             return hydrated
 
@@ -1054,6 +1120,7 @@ class ModelsRepo:
         updates: dict[UUID, float],
         *,
         cause_event_id: UUID | None = None,
+        audit_cause_override: str | None = None,
         conn: asyncpg.Connection | None = None,
     ) -> list[ModelRow]:
         """
@@ -1065,6 +1132,13 @@ class ModelsRepo:
         pre-calibration assertion, captured at INSERT and immutable
         afterwards. The DB has no trigger enforcing this; the
         application MUST keep the column out of every UPDATE statement.
+
+        `audit_cause_override`: when set, used as the audit_events
+        cause_type instead of the default `confidence_update`.
+        Callers in the reconciler-substitution path (applier sees a
+        recon decision of auto_merge or second_pass_merge that
+        produced a confidence-only update) pass `reconciliation_merge`
+        so the audit chain records the merge correctly.
         """
         if not updates:
             return []
@@ -1076,6 +1150,15 @@ class ModelsRepo:
             for mid, conf in updates.items():
                 ids.append(mid)
                 vals.append(_clip_confidence(float(conf)))
+
+            # Fetch pre-update confidences for audit previous_state.
+            pre_rows = await c.fetch(
+                "SELECT id, confidence FROM models WHERE id = ANY($1::uuid[])",
+                ids,
+            )
+            pre_conf: dict[UUID, float] = {
+                r["id"]: float(r["confidence"]) for r in pre_rows
+            }
 
             # UPDATE ... FROM (VALUES ...) AS u(id, conf).
             # We build a parameter list of (id, conf) pairs.
@@ -1094,6 +1177,11 @@ class ModelsRepo:
             )
             hydrated = [_hydrate_row(r) for r in rows]
 
+            from services.think.audit import (  # noqa: WPS433
+                CAUSE_CONFIDENCE_UPDATE,
+                emit_audit_event,
+            )
+            audit_cause = audit_cause_override or CAUSE_CONFIDENCE_UPDATE
             for row in hydrated:
                 await emit_state_change(
                     c,
@@ -1103,6 +1191,23 @@ class ModelsRepo:
                     cause_event_id=cause_event_id,
                     entity_kind="model",
                     metadata={"new_confidence": row.confidence},
+                )
+                old_conf = pre_conf.get(row.id)
+                previous_state = (
+                    {"confidence": old_conf}
+                    if old_conf is not None
+                    else None
+                )
+                new_state = {"confidence": float(row.confidence)}
+                await emit_audit_event(
+                    c,
+                    model_id=row.id,
+                    tenant_id=row.tenant_id,
+                    cause_type=audit_cause,
+                    new_state=new_state,
+                    previous_state=previous_state,
+                    cause_id=cause_event_id,
+                    changed_fields=["confidence"],
                 )
             return hydrated
 

@@ -189,9 +189,21 @@ async def apply_diff(
             reconcile_summary[recon_result.decision] += 1
             if recon_result.replacement_op is not None:
                 op = recon_result.replacement_op
+        # When the reconciler converted an insert into an update, the
+        # audit chain should record the transition as
+        # 'reconciliation_merge' rather than the default 'field_update'
+        # / 'confidence_update'. Thread the override down.
+        is_recon_merge = (
+            recon_result is not None
+            and recon_result.decision == "auto_merge"
+            and recon_result.replacement_op is not None
+        )
         result = await _apply_claim_op(
             op, conn, models_repo, diff.tenant_id,
             cause_event_id=trigger_cause_event_id,
+            audit_cause_override=(
+                "reconciliation_merge" if is_recon_merge else None
+            ),
         )
         # Annotate the per-op summary with reconcile context so callers
         # and tests can see what the reconciler decided.
@@ -264,6 +276,26 @@ async def apply_diff(
 # ---------------------------------------------------------------------
 
 
+def _audit_jsonable(v: Any) -> Any:
+    """Coerce a Python value into something JSON/JSONB can store."""
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    if isinstance(v, UUID):
+        return str(v)
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if isinstance(v, (list, tuple)):
+        return [_audit_jsonable(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _audit_jsonable(x) for k, x in v.items()}
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            return json.loads(v.decode())
+        except (ValueError, UnicodeDecodeError):
+            return v.decode(errors="replace")
+    return str(v)
+
+
 _ALLOWED_MODEL_UPDATE_COLUMNS = {
     "confidence",
     "signal_readings",
@@ -287,6 +319,7 @@ async def _apply_claim_op(
     tenant_id: UUID,
     *,
     cause_event_id: UUID | None,
+    audit_cause_override: str | None = None,
 ) -> dict[str, Any]:
     if op.op == "insert":
         entry = dict(op.entry or {})
@@ -340,18 +373,41 @@ async def _apply_claim_op(
         if not changes:
             raise ValidationError("apply_claim_op update: no allowed columns")
         if "confidence" in changes:
-            # bulk path handles emit_state_change cleanly.
+            # bulk path handles emit_state_change + audit cleanly. Pass
+            # the audit override so a reconciler-substituted update is
+            # recorded as 'reconciliation_merge' rather than the default
+            # 'confidence_update'.
             await models_repo.bulk_confidence_update(
                 {op.model_id: float(changes["confidence"])},
                 cause_event_id=cause_event_id,
+                audit_cause_override=audit_cause_override,
                 conn=conn,
             )
             changes.pop("confidence")
             emitted = 1
         else:
             emitted = 0
-        # For remaining columns, build an UPDATE + emit a state_change.
+        # For remaining columns, build an UPDATE + emit a state_change
+        # + emit an audit_events row. We snapshot the touched columns
+        # before and after so the audit chain captures the diff.
         if changes:
+            from .audit import (
+                CAUSE_FIELD_UPDATE,
+                emit_audit_event,
+            )
+
+            # Snapshot pre-update values for the touched columns. None
+            # of the _ALLOWED_MODEL_UPDATE_COLUMNS are SQL-reserved.
+            cols_csv = ", ".join(changes.keys())
+            pre_snapshot: dict[str, Any] = {}
+            pre_row = await conn.fetchrow(
+                f"SELECT {cols_csv} FROM models WHERE id = $1",
+                op.model_id,
+            )
+            if pre_row is not None:
+                for k in changes.keys():
+                    pre_snapshot[k] = _audit_jsonable(pre_row[k])
+
             set_clauses = []
             params: list[Any] = []
             i = 1
@@ -387,6 +443,19 @@ async def _apply_claim_op(
                 cause_event_id=cause_event_id,
                 entity_kind="model",
                 metadata={"columns": sorted(list(changes.keys()))},
+            )
+
+            # Audit event: partial snapshots of just the touched fields.
+            new_state = {k: _audit_jsonable(v) for k, v in changes.items()}
+            await emit_audit_event(
+                conn,
+                model_id=op.model_id,
+                tenant_id=tenant_id,
+                cause_type=audit_cause_override or CAUSE_FIELD_UPDATE,
+                new_state=new_state,
+                previous_state=pre_snapshot or None,
+                cause_id=cause_event_id,
+                changed_fields=sorted(list(changes.keys())),
             )
             emitted += 1
         return {

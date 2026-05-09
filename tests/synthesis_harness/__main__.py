@@ -52,6 +52,7 @@ async def main(
     adversarial_only: bool = False,
 ) -> int:
     from tests.synthesis_harness._runner import render_report, run_cases
+    from tests.synthesis_harness import cases_audit_chain
     from tests.synthesis_harness import cases_cascade  # noqa: WPS433
     from tests.synthesis_harness import cases_contest
     from tests.synthesis_harness import cases_falsifier
@@ -68,6 +69,7 @@ async def main(
         + cases_cascade.CASES
         + cases_reconcile.CASES
         + cases_reconciliation.CASES
+        + cases_audit_chain.CASES
     )
 
     adversarial_cases = []
