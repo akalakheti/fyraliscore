@@ -79,9 +79,14 @@ Decisions are cached in `reconciliation_decisions` keyed by `(model_id_a, model_
 
 ### Rationale
 
-[NEEDS USER INPUT: why three tiers and not two? Why these specific cosine boundaries? What real-world case forced the middle band?]
+The current single-pass implementation (cosine threshold only — see [V1_BASELINE.md](V1_BASELINE.md) Q1) is brittle in the borderline zone. Real customer signals show two failure modes simultaneously:
 
-The current single-pass implementation (cosine threshold only — see [V1_BASELINE.md](V1_BASELINE.md) Q1) is producing false-positive merges of related-but-distinct propositions and false-negative duplicates of paraphrases. The middle band is where cosine alone can't tell the difference; the LLM is asked to make the judgment call with full context.
+- **False positives near 0.85.** "We'll ship by EOQ for premium" and "We'll ship by EOQ" embed almost identically but are different propositions. A pure cosine threshold merges them, silently destroying the scoping nuance.
+- **False negatives in the 0.70–0.85 range.** Paraphrases of the same commitment ("ship by Q3 end" vs "deliver before quarter close") sit here. A pure cosine threshold creates duplicates that pollute the ledger.
+
+Two tiers (auto-merge above some threshold, create-new below) cannot resolve both failure modes — any single threshold makes one or the other worse. Three tiers acknowledge that the borderline zone is exactly where deterministic similarity is unreliable and human-language judgment is needed; the LLM is given both naturals plus full scope context and asked the binary question.
+
+**Threshold choices.** 0.85 keeps the existing auto-merge floor (already in code as `RECONCILE_AUTO_MERGE_COSINE`). 0.65 lowers from the current 0.70 floor — pulling more borderline pairs into LLM evaluation rather than silently creating duplicates. Both are starting values; the threshold-tuning infrastructure (PR 4) exists explicitly to adjust them against labeled data.
 
 ### Trade-offs accepted
 
@@ -120,9 +125,13 @@ Authoring is **LLM-driven for v1**. The extractor emits relationships alongside 
 
 ### Rationale
 
-[NEEDS USER INPUT: why introduce hierarchy at all? What query or feature can't work without it? Is this for retrieval recall, reconciliation precision, both?]
+Three concrete capabilities cannot work without explicit hierarchy:
 
-Today's flat `scope_entities` means a deal-scoped signal cannot satisfy a customer-scoped precondition (Q3) and cannot retrieve customer-level Models. Hierarchy makes the implicit explicit — a deal *belongs to* a customer, and that relationship is queryable.
+1. **Cross-scope retrieval.** Pathway A is actor-scoped only (see [V1_BASELINE.md](V1_BASELINE.md) Q2). A query about "customer X" today does not surface deal-level Models even though deals belong to that customer. Without hierarchy, retrieval recall is bounded by exact-scope match.
+2. **Precondition resolution under hierarchy (Q3).** An event-reference precondition scoped to "customer X" needs to match signals scoped to "deal Y" when deal Y belongs to customer X. The flat `scope_entities` array has no traversal — the precondition resolver has nothing to walk.
+3. **Reconciliation precision (Q1).** Two deals under the same customer may share near-identical commitment text. Q1's second-pass needs to know "same parent" vs "different customer entirely" to make the right call. Without hierarchy, the LLM is told they share no scope when they actually share a parent.
+
+Today's flat `scope_entities` makes these failures invisible — they manifest as missed retrieval results, latent commitments that never satisfy, and reconciliation precision that depends on textual similarity alone. Hierarchy makes the implicit explicit — a deal *belongs to* a customer, and that relationship is queryable.
 
 ### Trade-offs accepted
 
@@ -166,9 +175,20 @@ Downstream consumers (recommendation feed, capacity calculations) filter by stat
 
 ### Rationale
 
-[NEEDS USER INPUT: what real customer behavior or workflow forced preconditions? Was there a class of signal that couldn't be modeled today? Why are these the three forms — what was rejected?]
+Real customer signals routinely express conditional commitments: "we'll do X if/when Y." Without first-class preconditions, the substrate has two equally bad options:
 
-Today, Commitments are created `proposed` and immediately enter the active ledger. There's no way to express "we'll do X *if* Y" without losing the conditionality. Preconditions make the conditional Commitment a first-class node so it can wait for its trigger without polluting the recommendation feed.
+1. **Drop the conditional**, creating an unconditional `proposed` Commitment. The recommendation feed surfaces it as if it were active, generating false urgency. The conditional is lost as data.
+2. **Drop the signal**, refusing to extract anything. The intent is lost entirely, and the eventual unconditional version (when Y happens) has no provenance back to the original conditional.
+
+Preconditions resolve this by making the conditional a first-class `latent` Node. It exists in the substrate (queryable, auditable, reconcilable) but is excluded from active workflows until its precondition is satisfied.
+
+**Three forms** because three referent shapes cover the practical cases:
+
+- **Decision reference.** "We'll launch if leadership approves." Referent is a Decision Model; the Commitment activates when the Decision transitions to a satisfying state.
+- **Event reference.** "We'll fix it if customer escalates again." Referent is a future signal pattern within scoped entities; the satisfaction predicate is judged by LLM against incoming signals.
+- **Commitment reference.** "We'll start phase 2 once phase 1 ships." Referent is another Commitment; satisfaction follows the referent's state.
+
+**Time-based preconditions are deferred to v2** because they are scheduler infrastructure, not substrate logic — the v1 cases this work resolves are condition-based (waiting for a thing to happen), not date-based (waiting for a wall-clock instant).
 
 ### Trade-offs accepted
 
@@ -210,9 +230,13 @@ When reconciling **Commitment Nodes specifically**, confidence merge takes `max(
 
 ### Rationale
 
-[NEEDS USER INPUT: why fold strength into confidence rather than introducing a separate strength field (Q4-B in the prompt)? What was the failure mode that made this decision urgent — false-confidence aspirations dominating the recommendation feed?]
+The substrate has one unified scalar for "how much weight does this carry." Adding a separate strength field (Q4-B) would double the calibration surface — every prompt, every merge, every retrieval would need to reason about both confidence and strength independently — without a clear functional split. The dominant signal in real text is *speaker conviction*, which is exactly what confidence is supposed to capture. Conviction *is* strength for Commitments; treating them as separate axes adds machinery for no observable benefit.
 
-The current code already takes `max()` in reconciliation (see [V1_BASELINE.md](V1_BASELINE.md) Q4); the work is making this explicit and Commitment-only, plus calibrating the prompt so confidence numbers actually reflect linguistic strength rather than the LLM's overall certainty in extraction.
+The failure mode that made this urgent is visible in the adversarial harness today (`hedged_commitment_low_confidence`, `compound_linguistic_pressure` — see [V1_BASELINE.md](V1_BASELINE.md) Q4). Aspirational language was producing too-high confidence values; those values then survived merges and elevated noise to the recommendation feed. The fix is calibrating the prompt against linguistic markers so that aspirational text *produces* low confidence in the first place — not introducing a second field to compensate downstream.
+
+**The Commitment-merge `max(...)` exception** is necessary because committed-language updates ("we will ship by Q3 — final, no more discussion") should not be downgraded by lingering aspirational confidence from earlier signals about the same proposition. The default merge rule (`bulk_confidence_update`) averages or weights, which would re-introduce the original failure mode. `max(...)` preserves the most recent committed assertion; for non-Commitment Nodes (state, concern, expectation), the default rule remains because state observations *should* average across evidence.
+
+The current code already takes `max()` in reconciliation. The work is making this explicit, Commitment-only, and named — plus calibrating the prompt so confidence reflects linguistic strength rather than the LLM's overall certainty in extraction.
 
 ### Trade-offs accepted
 
@@ -266,11 +290,15 @@ CREATE TABLE audit_events (
 
 ### Rationale
 
-[NEEDS USER INPUT: why a parallel audit table rather than extending the existing observations/event log? What query or compliance requirement forced this? Why preserve reversal-of-reversal as three distinct events instead of a single "back to original" event?]
+A parallel `audit_events` table — rather than extending observations or `reconciliation_events` — because the three serve fundamentally different purposes:
 
-Today there is no general audit chain (see [V1_BASELINE.md](V1_BASELINE.md) Q5). State changes flow through observations with `cause_id` linkage, but there is no structured `previous_state` / `new_state` / `changed_fields` record. Reconstructing a Model's history requires walking observations by cause — fragile and incomplete.
+- **Observations** are *signals coming in*. Tenant-scoped events from external sources (channels, integrations). Their schema is signal-shaped: source channel, content, embedding, trust tier. They are not state-transition records.
+- **`reconciliation_events`** is *decision history* for the reconciler — a queue plus an audit of each reconcile choice. Keyed by `(model_id_a, model_id_b)`; not Model-history shaped.
+- **`audit_events`** is *per-Model state history*. Keyed by `model_id`; carries `previous_state` / `new_state` / `changed_fields`. None of those fields fit observations or `reconciliation_events`.
 
-The reversal-of-reversal preservation rule exists because users need to see oscillation patterns ("they keep flipping their position on this") rather than a flat current-state view that hides the volatility.
+Trying to overload either existing table would either (a) bloat its schema with mostly-NULL columns or (b) lose the typed structure that makes audit chains queryable. A separate table is cheaper to reason about and to index for `get_audit_chain(model_id)` queries.
+
+**Reversal-of-reversal as three events, not one.** Oscillation is itself information. A Model that goes A → B → A is not in "no net change" state — it is in "the position keeps flipping" state. Compressing to a single net-zero event hides the volatility, and volatility is diagnostic for downstream consumers (recommendation feed weighting, contestability surfacing, customer-health detection). The `re_asserts_event_id` pointer preserves the rhetorical shape ("we're back where we started") while keeping the three transitions as distinct facts.
 
 ### Trade-offs accepted
 
@@ -307,7 +335,7 @@ These are decisions that V1_PR_PROMPTS.md flags but does not resolve. Each block
 | **OQ6** | Q3+Q4 interaction: when reconciling a latent Commitment with an active Commitment, does the merge rule still use `max(...)`? Does the merged Commitment inherit `latent` or `active`? | PR 3 design |
 | **OQ7** | Q2 backfill: should existing implicit relationships (e.g., from observed actor-team patterns) be inferred during PR 5 backfill, or is hierarchy purely forward-looking? | PR 5 design |
 | **OQ8** | Q2 hierarchy update: when evidence contradicts an existing relationship (a deal moves customers, an employee changes teams), are old Models rebound to the new parent or preserved with the old relationship? | PR 5 design |
-| **OQ9** | Q5 audit chain query depth: is full-chain retrieval bounded? For a Model with thousands of audit events, is paging required, or do consumers always read the full chain? | PR 1 (or deferred to v2) |
+| ~~**OQ9**~~ | ~~Q5 audit chain query depth: is full-chain retrieval bounded?~~ **Resolved (2026-05-09):** `get_audit_chain(model_id)` returns the full chain, unbounded, ordered by `occurred_at`. v1 audit chains are expected to stay in the dozens-per-Model range; deferring paging keeps the substrate API simple. If a consumer hits a multi-thousand-event Model in production, paging gets added at the API layer (gateway), not the substrate layer. | ~~PR 1~~ Resolved |
 
 ---
 
@@ -315,4 +343,4 @@ These are decisions that V1_PR_PROMPTS.md flags but does not resolve. Each block
 
 | Date | Change | Author |
 |---|---|---|
-| 2026-05-09 | Initial draft. Five decisions captured from V1_PR_PROMPTS.md content. Rationale sections marked `[NEEDS USER INPUT]` where the underlying motivation isn't in the prompt. | Rachin + Claude |
+| 2026-05-09 | Initial draft. Five decisions captured from V1_PR_PROMPTS.md content. Rationale paragraphs filled in by Claude based on derivable signals (adversarial harness failure modes, baseline current-state findings, V1_PR_PROMPTS.md scope/risks sections); user delegated rationale-drafting via "go with your best choices" rather than pasting authoritative paragraphs — surface for amendment if any rationale misreads the original intent. OQ9 resolved (audit chain unbounded for v1). OQ1–OQ8 remain open for their respective PR design gates. | Rachin + Claude |
