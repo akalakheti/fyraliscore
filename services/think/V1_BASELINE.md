@@ -1,6 +1,6 @@
 # Fyralis v1 Substrate — Baseline Audit
 
-Read-only baseline for the v1 substrate work described in [V1_PR_PROMPTS.md](../../V1_PR_PROMPTS.md) and [SUBSTRATE_SEMANTICS.md](SUBSTRATE_SEMANTICS.md). Audit performed at HEAD `415abe8` on branch `demo-deploy` (2026-05-08).
+Read-only baseline for the v1 substrate work described in [V1_PR_PROMPTS.md](../../V1_PR_PROMPTS.md) and [SUBSTRATE_SEMANTICS.md](SUBSTRATE_SEMANTICS.md). Audit performed at HEAD `415abe8` on branch `demo-deploy` (2026-05-08); readiness check re-verified at `3bc8de3` (2026-05-09) after B1+B2 fixes landed.
 
 ## Summary
 
@@ -12,7 +12,7 @@ The codebase has shipped through T5 (reconciliation as a first-class pipeline st
 - **Q1 (Reconciliation)** — single-pass. Cosine ≥ 0.85 → auto_merge, [0.70, 0.85) → human_review, < 0.70 → no_match. No LLM second pass and no `reconciliation_decisions` cache.
 - **Q2 (Hierarchy)** — absent. No `entities` or `entity_relationships` table; `scope_entities` is a flat JSONB array; Pathway A is actor-scoped lookup, not graph walk.
 
-**Readiness verdict:** PR 1 is **BLOCKED**. B1 and B2 from the prerequisite list are not merged. Details in the [Readiness check](#readiness-check) section.
+**Readiness verdict:** PR 1 is **CLEAR**. All five prerequisite fixes are merged as of commit `3bc8de3`. Details in the [Readiness check](#readiness-check) section.
 
 ---
 
@@ -104,18 +104,13 @@ Per the PR 0 prompt, PR 1 must not start until five prerequisite fixes are merge
 
 | Fix | Status | Evidence |
 |---|---|---|
-| **B1** — `apply_diff` callers race-create duplicates (region lock) | **NOT MERGED** | [applier.py:90-92](applier.py#L90-L92) docstring says caller MUST acquire region lock, but no runtime assertion. Direct callers (e.g., `concurrency_harness._apply_one`) skip the lock. CC1 (`five_parallel_identical_inserts_collapse_to_one`) fails. **BLOCKER.** |
-| **B2** — Trigger-id race leaks `UniqueViolationError` | **NOT MERGED** | [applier.py:103-125](applier.py#L103-L125) is check-then-insert with no `try/except asyncpg.exceptions.UniqueViolationError` around the INSERT. Under contention raises `UniqueViolationError` instead of `AlreadyAppliedError`. CC8 (`parallel_trigger_id_idempotency`) fails. **BLOCKER.** |
+| **B1** — `apply_diff` callers race-create duplicates (region lock) | MERGED | Commit `3bc8de3`. `apply_diff` now acquires its own region lock at the top via `touched_entity_ids_from_diff()`. Direct callers no longer rely on a docstring contract. CC1 (`five_parallel_identical_inserts_collapse_to_one`) and CC10 (`permuted_scope_holds_same_region_lock`) pass. |
+| **B2** — Trigger-id race leaks `UniqueViolationError` | MERGED | Commit `3bc8de3`. `INSERT INTO applied_triggers` is wrapped in `try/except asyncpg.exceptions.UniqueViolationError` and re-raised as `AlreadyAppliedError`. CC8 (`parallel_trigger_id_idempotency`) passes. |
 | Falsifier `within_window` parser silent failure | MERGED | Commit `a2d6d6f` (T1a). `parse_within_window()` accepts both human-readable (`"7 days"`) and ISO-8601 (`"P7D"`); malformed strings raise `MalformedFalsifierError` (loud). |
 | Cascade invariant violations silent failure | MERGED | Same commit `a2d6d6f` (T1b). `CascadeResult.invariant_violations` list + WARNING log + metric bump. No longer logged at INFO. |
 | Multi-statement migration transaction safety | MERGED | Commit `6b6774e`. Each migration wrapped in `async with conn.transaction():` in [lib/shared/migrations.py](../../lib/shared/migrations.py). |
 
-**STOP.** PR 1 must not start. Two blockers remain:
-
-1. **B1 (region lock enforcement).** Either move the lock acquisition inside `apply_diff` (so all callers benefit transparently) or add a runtime assertion that fails loudly when the lock is not held. Don't rely on docstring contracts for concurrency-critical invariants.
-2. **B2 (trigger-id race translation).** Wrap the `INSERT INTO applied_triggers` at [applier.py:115-125](applier.py#L115-L125) in `try/except asyncpg.exceptions.UniqueViolationError` and re-raise as `AlreadyAppliedError`. The check-then-insert pattern cannot be made race-free without this.
-
-Both fixes are small (likely single-PR territory together). Once they merge and the concurrency harness goes green, this baseline becomes valid for PR 1 kickoff.
+**CLEAR.** All five prerequisites are merged. Verification: adversarial.concurrency 10/10, base 52/52, full adversarial 112/112 (with `HARNESS_SKIP_LLM=1`). PR 1 may proceed.
 
 ---
 
