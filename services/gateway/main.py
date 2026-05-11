@@ -189,6 +189,8 @@ _PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     # /sessions/start endpoint mints the auth token for everything else.
     "/v1/demo/companies",
     "/v1/demo/sessions/start",
+    # Bench surface is developer tooling — no auth required.
+    "/v1/bench/",
 )
 
 

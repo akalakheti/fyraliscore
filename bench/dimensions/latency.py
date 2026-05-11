@@ -34,11 +34,11 @@ from bench.types import DimensionResult, Metric
 
 
 _SCENARIOS = (
-    # (label, sql)
+    # (label, sql)  — kept to schemas that exist in every migration set.
     ("count_observations", "SELECT count(*) FROM observations"),
     ("count_models", "SELECT count(*) FROM models"),
-    ("count_acts", "SELECT count(*) FROM acts"),
     ("count_actors", "SELECT count(*) FROM actors"),
+    ("count_commitments", "SELECT count(*) FROM commitments"),
 )
 
 
