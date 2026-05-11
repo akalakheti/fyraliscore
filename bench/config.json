@@ -1,0 +1,5 @@
+{
+  "default_baseline_branch": "demo-deploy",
+  "scenarios_per_dimension": 10,
+  "max_concurrent_runs": 1
+}

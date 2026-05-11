@@ -6,6 +6,10 @@ import DemoPicker from "./pages/DemoPicker";
 import Structure from "./pages/Structure";
 import History from "./pages/History";
 import MyMind from "./pages/MyMind";
+import Bench from "./pages/Bench";
+import BenchNew from "./pages/BenchNew";
+import BenchRun from "./pages/BenchRun";
+import BenchProfile from "./pages/BenchProfile";
 import { DebugLayout } from "./debug/DebugLayout";
 import { SignalsList } from "./debug/pages/SignalsList";
 import { SignalDetailPage } from "./debug/pages/SignalDetail";
@@ -29,6 +33,13 @@ ReactDOM.createRoot(root).render(
         <Route path="/structure" element={<Structure />} />
         <Route path="/history" element={<History />} />
         <Route path="/mind" element={<MyMind />} />
+        <Route path="/bench" element={<Bench />} />
+        <Route path="/bench/new" element={<BenchNew />} />
+        <Route path="/bench/runs/:runId" element={<BenchRun />} />
+        <Route
+          path="/bench/runs/:runId/profile/:kind"
+          element={<BenchProfile />}
+        />
         <Route path="/debug" element={<DebugLayout />}>
           <Route index element={<Navigate to="signals" replace />} />
           <Route path="signals" element={<SignalsList />} />

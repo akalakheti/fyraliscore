@@ -1,0 +1,28 @@
+{
+  "latency": {
+    "default": {"delta_pct": 0.15},
+    "ingest_p95": {"delta_pct": 0.15},
+    "retrieve_p95": {"delta_pct": 0.15},
+    "think_p95": {"delta_pct": 0.20},
+    "apply_p95": {"delta_pct": 0.15}
+  },
+  "throughput": {
+    "default": {"delta_pct": 0.10}
+  },
+  "retrieval_quality": {
+    "default": {"delta_abs": 0.03},
+    "recall_at_10": {"delta_abs": 0.03},
+    "ndcg_at_10": {"delta_abs": 0.03}
+  },
+  "reasoning_quality": {
+    "ece": {"delta_abs": 0.05},
+    "pass_rate": {"delta_abs": 0.02},
+    "default": {"delta_abs": 0.02}
+  },
+  "cost": {
+    "default": {"delta_pct": 0.20},
+    "mean_usd_per_run": {"delta_pct": 0.20},
+    "p95_input_tokens": {"delta_pct": 0.20},
+    "p95_output_tokens": {"delta_pct": 0.20}
+  }
+}

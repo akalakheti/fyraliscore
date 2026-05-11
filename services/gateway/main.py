@@ -481,6 +481,13 @@ def build_app(
     from services.demo.router import demo_router as _demo_router
 
     app.include_router(_demo_router)
+
+    # Mount the bench router (/v1/bench/*) — UI-driven benchmarking.
+    from services.gateway.bench_routes import bench_router as _bench_router
+    from services.gateway.bench_ws import register_bench_ws as _register_bench_ws
+
+    app.include_router(_bench_router)
+    _register_bench_ws(app)
     return app
 
 
