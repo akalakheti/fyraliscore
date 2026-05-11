@@ -259,6 +259,27 @@ async def cancel_run(request: Request, run_id: UUID) -> JSONResponse:
     return JSONResponse(content={"cancelled": ok})
 
 
+@bench_router.get("/baselines/{dimension}")
+async def get_baseline(dimension: str) -> JSONResponse:
+    """Return the committed baseline JSON for one dimension.
+
+    Used by the BenchBaselines.tsx page to render the current
+    regression reference values without leaving the browser.
+    """
+    if dimension not in {
+        "latency", "throughput", "retrieval_quality",
+        "reasoning_quality", "cost",
+    }:
+        raise HTTPException(status_code=400, detail="unknown dimension")
+    payload = bench_config.load_baseline(dimension)
+    if payload is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "no baseline committed for this dimension"},
+        )
+    return JSONResponse(content=payload)
+
+
 @bench_router.post("/baselines")
 async def save_baseline(request: Request, body: SaveBaselineRequest) -> JSONResponse:
     pool = _pool(request)

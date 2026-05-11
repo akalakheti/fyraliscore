@@ -43,6 +43,9 @@ ReactDOM.createRoot(root).render(
           path="/bench/runs/:runId/profile/:kind"
           element={<BenchProfile />}
         />
+        <Route path="/bench/compare" element={<BenchCompare />} />
+        <Route path="/bench/trends" element={<BenchTrends />} />
+        <Route path="/bench/baselines" element={<BenchBaselines />} />
         <Route path="/debug" element={<DebugLayout />}>
           <Route index element={<Navigate to="signals" replace />} />
           <Route path="signals" element={<SignalsList />} />

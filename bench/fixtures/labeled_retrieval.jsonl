@@ -1,0 +1,6 @@
+# bench/fixtures/labeled_retrieval.jsonl
+# Hand-labeled retrieval ground truth. Schema:
+#   {"query_text": "...", "tenant_id": "<uuid>", "relevant_model_ids": ["<uuid>", ...]}
+# Lines beginning with '#' and blank lines are skipped.
+# This file starts empty; add entries to enable real recall@k / NDCG
+# measurement on the retrieval_quality dimension.

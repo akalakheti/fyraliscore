@@ -21,11 +21,9 @@ interface BaselineFile {
 }
 
 async function fetchBaseline(d: DimensionName): Promise<BaselineFile> {
-  // The gateway doesn't yet expose a baseline-read endpoint; we read
-  // the file directly via Vite's static-file proxy at /bench/baselines/.
-  // In production, the same path is served by FastAPI's StaticFiles
-  // mount (added in the polish step).
-  const url = `/bench/baselines/${d}.json`;
+  // Gateway endpoint: GET /v1/bench/baselines/{dimension} → JSON payload
+  // from bench/baselines/<dimension>.json.
+  const url = `${BASE}/v1/bench/baselines/${encodeURIComponent(d)}`;
   try {
     const res = await fetch(url, { headers: { ...getAuthHeader() } });
     if (!res.ok) {
