@@ -11,6 +11,7 @@
 
 - Q: Can `secret_ref` be updated on an existing `provider_installations` row, or is it write-once? → A: Updatable via a dedicated admin action — register / disable / re-enable / update-secret-ref are all supported, preserving the row's identity and `installed_at`.
 - Q: Which metrics MUST the resolver emit (to make SC-002, SC-004, SC-005 testable without leaking installation IDs)? → A: Two counters labeled by low-cardinality enums — `webhook_resolver_outcomes_total{provider,outcome}` and `webhook_resolver_cache_total{provider,result}` — plus a latency histogram `webhook_resolver_duration_seconds{provider}`. `outcome ∈ {resolved, unknown_installation, payload_missing}`; `result ∈ {hit, miss, bypass}`. No installation_id labels, ever.
+- Q: What is the p95 latency target for the resolver hot path (separately for cache-hit and cache-miss)? → A: Hit ≤ 2 ms p95, miss ≤ 25 ms p95. The 2 ms hit target forces an in-process cache tier (a Redis-only design cannot meet it under typical container RTT); the 25 ms miss target leaves room for one Postgres round-trip plus a cache write inside IN-06's end-to-end webhook budget.
 
 ## Context & Substrate Alignment
 
@@ -477,6 +478,14 @@ counting.
   branches of the test suite, contains the installation_id verbatim
   or any portion of the request body. Verified by a structured-log
   assertion in the integration test suite.
+- **SC-009**: The resolver's cache-hit path completes within
+  **2 ms p95** and the cache-miss path within **25 ms p95**,
+  measured by the `webhook_resolver_duration_seconds{provider}`
+  histogram (FR-018) under a representative 1-minute load
+  window with a steady-state cache. The hit-path target is
+  binding on cache-backend selection in the plan phase: a
+  cache architecture that cannot deliver 2 ms p95 hits is
+  rejected at plan review.
 
 ## Assumptions
 
