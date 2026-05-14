@@ -68,7 +68,7 @@ _PROVIDER_CHANNEL: dict[str, str] = {
     "github": "github:webhook",
     "linear": "linear:webhook",
     "stripe": "stripe:webhook",
-    "discord": "discord:webhook",
+    "discord": "discord:interaction",
 }
 
 
