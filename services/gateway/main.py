@@ -333,6 +333,42 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------
 
 
+def _wire_in08_state(app_: FastAPI, pool: asyncpg.Pool) -> None:
+    """Wire IN-08 dependencies onto `app_.state`.
+
+    Idempotent — checks for existing attributes so repeated calls
+    (test path + lifespan path) don't double-construct. Both the
+    secret store and the tenant resolver are required by the webhook
+    router cutover in IN-08, so they're wired together here.
+
+    Defers imports to function scope to avoid pulling lib.shared.secrets
+    and services.webhooks.tenant_resolver into the module-load graph
+    when tests don't need them.
+    """
+    import time
+
+    from lib.shared.secrets import build_secret_store
+    from services.webhooks.tenant_resolver import (
+        InstallationCache,
+        TenantResolverDeps,
+        build_tenant_resolver,
+        default_metrics,
+    )
+
+    if getattr(app_.state, "secret_store", None) is None:
+        app_.state.secret_store = build_secret_store(pool)
+
+    if getattr(app_.state, "tenant_resolver", None) is None:
+        app_.state.tenant_resolver = build_tenant_resolver(
+            TenantResolverDeps(
+                pool=pool,
+                cache=InstallationCache(),
+                clock=time.monotonic,
+                metrics=default_metrics(),
+            )
+        )
+
+
 def build_app(
     *,
     pool: asyncpg.Pool | None = None,
@@ -377,6 +413,10 @@ def build_app(
                 or os.environ.get("SLACK_SIGNING_SECRET")
             ),
         )
+        # IN-08: wire the envelope-encrypted secret store and the
+        # DB-backed TenantResolver. The webhook router and the new
+        # integrations router both read these from `request.app.state`.
+        _wire_in08_state(app_, pool)
         # Wave 4-D: realtime wiring. Only configure if not already done
         # (tests path pre-wires before lifespan). Lazy import to avoid
         # a services.gateway ↔ services.realtime circular.
@@ -455,6 +495,9 @@ def build_app(
             rate_limiter=rate_limiter,
             slack_signing_secret=slack_signing_secret,
         )
+        # IN-08: same wiring as the lifespan path, for tests that
+        # pre-build the app synchronously and skip lifespan startup.
+        _wire_in08_state(app, pool)
 
     # Middleware order: add last → first to run.
     # Each middleware resolves deps lazily from request.app.state so

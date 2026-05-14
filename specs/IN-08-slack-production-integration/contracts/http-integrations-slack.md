@@ -49,7 +49,7 @@ This avoids any "blanket public" exposure (per ClickUp body's "single-route, not
 2. Generate `nonce = secrets.token_urlsafe(32)`.
 3. `expires_at = now() + INSTALL_STATE_TTL` (default 10 min, env-configurable).
 4. `INSERT INTO oauth_install_states (id, tenant_id, nonce, provider, expires_at) VALUES (uuid7(), $tenant_id, $nonce, 'slack', $expires_at)`.
-5. `state_token = base64url(payload_json) + "." + base64url(hmac_sha256(SERVER_HMAC_KEY, payload_json))` where `payload_json = {"tenant_id": str(tenant_id), "nonce": nonce, "expires_at": iso8601(expires_at)}`. The `tenant_id` in the payload is for client-side debugging only; the **DB nonce is the binding** at consumption time.
+5. `state_token = base64url(payload_json) + "." + base64url(hmac_sha256(OAUTH_STATE_HMAC_KEY, payload_json))` where `payload_json = {"tenant_id": str(tenant_id), "nonce": nonce, "expires_at": iso8601(expires_at)}`. `OAUTH_STATE_HMAC_KEY` is read from env at gateway startup (32-byte URL-safe-base64; same generator as `MASTER_KEK`); missing/empty in production fails startup. The `tenant_id` in the payload is for client-side debugging only; the **DB nonce is the binding** at consumption time.
 6. Construct the Slack URL: `https://slack.com/oauth/v2/authorize?client_id=$SLACK_CLIENT_ID&scope=$SCOPES&state=$state_token&redirect_uri=$REDIRECT_URI`.
    - `$SCOPES = "channels:history,groups:history,im:history,mpim:history,users:read,team:read"` (bot scopes).
    - `$REDIRECT_URI` is a config var that points at the public `/integrations/slack/callback` URL of this deployment.

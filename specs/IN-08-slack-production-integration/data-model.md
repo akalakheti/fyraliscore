@@ -162,7 +162,7 @@ Browser (Slack workspace admin)
     │            oauth_install_states.INSERT(id, tenant_id, nonce, provider='slack', expires_at)
     │                  │
     │                  ▼
-    │       state_token = HMAC({tenant_id, nonce, expires_at}, SERVER_HMAC_KEY)
+    │       state_token = HMAC({tenant_id, nonce, expires_at}, OAUTH_STATE_HMAC_KEY)
     │                  │
     ├─[2]◀────── 302 https://slack.com/oauth/v2/authorize?...&state=<state_token>
     │
