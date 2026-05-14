@@ -335,6 +335,7 @@ async def _exchange_code_for_tokens(code: str) -> dict[str, Any]:
     """
     client_id = os.environ.get("SLACK_CLIENT_ID", "")
     client_secret = os.environ.get("SLACK_CLIENT_SECRET", "")
+    redirect_uri = os.environ.get("SLACK_REDIRECT_URI", "")
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.post(
             _SLACK_OAUTH_ACCESS_URL,
@@ -342,6 +343,7 @@ async def _exchange_code_for_tokens(code: str) -> dict[str, Any]:
                 "code": code,
                 "client_id": client_id,
                 "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
             },
         )
     r.raise_for_status()
