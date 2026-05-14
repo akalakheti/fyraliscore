@@ -48,6 +48,10 @@ def _set_oauth_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISCORD_APPLICATION_ID", "A_TEST_APP_ID")
     monkeypatch.setenv("WEBHOOK_SECRET_DISCORD", _DISCORD_PUBLIC_KEY_HEX)
     monkeypatch.setenv("OAUTH_STATE_HMAC_KEY", "test-hmac-key-discord-callback")
+    # IN-09 commands.py reads the app-level Bot Token from env (NOT the
+    # OAuth response). Set a dummy value so the registration call goes
+    # out and respx can mock it. Real value lives in deployment env.
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-bot-token-app-level-test")
     discord_metrics.reset()
 
 

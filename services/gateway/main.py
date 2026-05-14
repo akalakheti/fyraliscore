@@ -179,7 +179,15 @@ _PUBLIC_PATHS = frozenset({
     # as a prefix entry — single-route, not blanket public.
     "/integrations/slack/callback",
     # IN-09: same posture for Discord. /install stays Bearer-required.
+    # /installed and /install-error are the redirect targets the OAuth
+    # callback issues. The browser follows the 302 without a Bearer,
+    # so these MUST be on the allowlist or the browser sees 401
+    # missing_bearer after a successful install.
     "/integrations/discord/callback",
+    "/integrations/discord/installed",
+    "/integrations/discord/install-error",
+    "/integrations/slack/installed",
+    "/integrations/slack/install-error",
 })
 
 # Path prefixes that bypass the gateway's bearer-session middleware.

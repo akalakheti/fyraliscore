@@ -8,12 +8,23 @@ Clarifications Q2 (the per-name upsert path; Discord auto-upserts on
 rejected; a one-time bootstrap was rejected because it breaks the
 self-serve contract in SC-001.
 
+Auth: uses the **app-level Bot Token** from `DISCORD_BOT_TOKEN` env
+var (NOT the per-installation OAuth access_token). The OAuth flow's
+`access_token` is a user Bearer that confirms the install but does
+not carry permission to register global commands — that requires the
+app's bot token from the Developer Portal's Bot tab. This was
+discovered live during IN-09 dev-testing; the per-installation
+`discord_bot_token:<gid>` rows in encrypted_secrets continue to hold
+the OAuth access_token for future refresh-token use, but they are
+NOT what we authenticate global-command writes with.
+
 Called from `oauth.callback_handler` after a successful token
 exchange. Failure here does NOT block the install (FR-012); the
 audit row carries `status='error'` and the Discord error code.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -44,7 +55,7 @@ _FYRALIS_COMMAND_SPEC: dict[str, Any] = {
 
 async def register_fyralis_command(
     application_id: str,
-    bot_token: str,
+    bot_token: str | None = None,
     *,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
@@ -54,10 +65,21 @@ async def register_fyralis_command(
     Raises `DiscordOAuthError(code='discord_command_registration_failed')`
     on a 4xx response — caller writes audit row with `status='error'`
     and 5xx propagates as `httpx.HTTPStatusError` (caller chooses).
+
+    `bot_token` is accepted for back-compat with existing tests but is
+    ignored in favour of the env-level `DISCORD_BOT_TOKEN`. See the
+    module docstring for why.
     """
+    auth_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+    if not auth_token:
+        raise DiscordOAuthError(
+            "DISCORD_BOT_TOKEN env var not configured — cannot register global commands",
+            code="discord_command_registration_failed",
+            context={"http_status": 0, "discord_error_code": "missing_bot_token"},
+        )
     url = f"{_DISCORD_API_BASE}/applications/{application_id}/commands"
     headers = {
-        "Authorization": f"Bot {bot_token}",
+        "Authorization": f"Bot {auth_token}",
         "Content-Type": "application/json",
     }
     owns_client = http_client is None
