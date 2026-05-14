@@ -355,13 +355,16 @@ async def _persist_secrets(
     tenant_id: UUID,
     team_id: str,
     slack_response: dict[str, Any],
-) -> tuple[str, str | None]:
+) -> tuple[str, str, str | None]:
     """Store bot token + (optional) user token + per-tenant signing
-    secret in the secret store. Returns `(bot_ref, user_ref_or_None)`.
+    secret in the secret store. Returns `(signing_ref, bot_ref,
+    user_ref_or_None)`.
 
-    `secret_ref` on `provider_installations` will point at the bot
-    token's ref; other refs are addressable via `label` queries within
-    the tenant.
+    `secret_ref` on `provider_installations` MUST point at the
+    signing-secret ref — that's what `services/webhooks/secrets.py
+    ::_load_from_db` resolves when verifying inbound HMAC signatures.
+    The bot/user token refs are addressable via `label` queries
+    within the tenant for outbound calls.
     """
     bot_token = slack_response.get("access_token") or ""
     if not bot_token:
@@ -389,21 +392,25 @@ async def _persist_secrets(
     # dedupe; a re-install rewrites the row but the secret store's
     # `put` always allocates a fresh ref (rotation is via `rotate`).
     signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "")
-    if signing_secret:
-        await secret_store.put(
-            signing_secret,
-            label="slack_signing_secret:app",
-            tenant_id=tenant_id,
+    if not signing_secret:
+        raise SecretStoreError(
+            "SLACK_SIGNING_SECRET env var not set — cannot persist signing secret",
+            reason="missing_signing_secret",
         )
+    signing_ref = await secret_store.put(
+        signing_secret,
+        label="slack_signing_secret:app",
+        tenant_id=tenant_id,
+    )
 
-    return bot_ref, user_ref
+    return signing_ref, bot_ref, user_ref
 
 
 async def _upsert_installation(
     pool: asyncpg.Pool,
     tenant_id: UUID,
     team_id: str,
-    bot_ref: str,
+    secret_ref_value: str,
 ) -> tuple[UUID, bool]:
     """UPSERT a `provider_installations` row keyed by
     `(provider='slack', installation_id=team_id)`. The conflict path
@@ -428,7 +435,7 @@ async def _upsert_installation(
         row_id,
         tenant_id,
         team_id,
-        bot_ref,
+        secret_ref_value,
     )
     if row is None:
         # Row exists for the same `(provider, team_id)` but a different
@@ -568,7 +575,7 @@ async def callback_handler(request: Request) -> Any:
 
     # 5. Persist tokens.
     try:
-        bot_ref, _user_ref = await _persist_secrets(
+        signing_ref, bot_ref, _user_ref = await _persist_secrets(
             secret_store, tenant_id, team_id, slack_response,
         )
     except SecretStoreError as exc:
@@ -586,7 +593,7 @@ async def callback_handler(request: Request) -> Any:
     # 6. Upsert installation. Collision is the cross-tenant rebind case.
     try:
         installation_row_id, was_inserted = await _upsert_installation(
-            pool, tenant_id, team_id, bot_ref,
+            pool, tenant_id, team_id, signing_ref,
         )
     except InstallationCollisionError:
         log.info("slack_install_failure", reason="installation_collision")
