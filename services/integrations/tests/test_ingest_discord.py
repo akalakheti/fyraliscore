@@ -153,9 +153,14 @@ async def test_interaction_lands_as_observation(
     body = _build_interaction_body(query="What's our churn rate?")
     r = await _post_interaction(app, sk, body)
 
-    assert r.status_code in (200, 201), r.text
+    # The router emits Discord's interaction-ack shape for type=2;
+    # substrate metadata lands in response headers.
+    assert r.status_code == 200, r.text
     body_json = r.json()
-    assert "observation_id" in body_json
+    assert body_json.get("type") == 4
+    assert body_json.get("data", {}).get("flags") == 64  # EPHEMERAL
+    assert "X-Observation-Id" in r.headers
+    assert r.headers["X-Deduped"] == "false"
 
     row = await fresh_db.fetchrow(
         "SELECT source_channel, content_text, external_id, trust_tier, source_actor_ref "
@@ -187,11 +192,12 @@ async def test_duplicate_interaction_id_is_idempotent(
     r1 = await _post_interaction(app, sk, body, ts=int(time.time()))
     r2 = await _post_interaction(app, sk, body, ts=int(time.time()))
 
-    assert r1.status_code in (200, 201)
-    assert r2.status_code in (200, 201)
-    # One of them should mark `deduped=True`.
-    flags = sorted([r1.json().get("deduped"), r2.json().get("deduped")])
-    assert flags == [False, True], (r1.json(), r2.json())
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    # Each Discord interaction returns the ack shape; dedup state is
+    # in the X-Deduped response header.
+    flags = sorted([r1.headers.get("X-Deduped"), r2.headers.get("X-Deduped")])
+    assert flags == ["false", "true"], (r1.headers, r2.headers)
 
     count = await fresh_db.fetchval(
         "SELECT count(*) FROM observations WHERE tenant_id=$1 "

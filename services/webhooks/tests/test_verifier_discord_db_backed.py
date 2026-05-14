@@ -121,13 +121,17 @@ async def test_signed_interaction_resolves_via_db_backed_public_key(
             },
         )
 
-    # Verification succeeded → observation written.
-    assert r.status_code in (200, 201), r.text
+    # Verification succeeded → observation written. For Discord type=2
+    # the router returns the interaction-ack shape (type=4 ephemeral);
+    # substrate metadata is in response headers.
+    assert r.status_code == 200, r.text
     body_json = r.json()
-    assert body_json.get("observation_id")
-    # The secret label in the response identifies the DB-backed path
-    # (label prefix is 'installation:<ref>' per services/webhooks/secrets.py).
-    secret_label = body_json.get("secret_label", "")
+    assert body_json.get("type") == 4
+    assert r.headers.get("X-Observation-Id")
+    # Secret label in the X-Secret-Label header identifies the
+    # DB-backed path (label prefix 'installation:<ref>'
+    # per services/webhooks/secrets.py).
+    secret_label = r.headers.get("X-Secret-Label", "")
     assert secret_label.startswith("installation:"), (
         f"expected DB-backed path (installation:<ref>), got {secret_label!r}"
     )
