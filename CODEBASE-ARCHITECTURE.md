@@ -2053,4 +2053,48 @@ Spec: `specs/IN-09-discord-interactions-integration/`.
 
 ---
 
+## §16 — Discord Gateway WSS Message Ingest (IN-12)
+
+IN-12 adds a fourth long-running worker process whose sole responsibility is to hold a persistent WebSocket connection to `wss://gateway.discord.gg`, dispatch every `MESSAGE_CREATE` event to the existing ingestion handler, and survive transient disconnects via Discord's RESUME protocol. This closes the gap between Discord and Slack: Slack pushes every channel message to our `/webhooks/slack/events` HTTP endpoint via the Events API; Discord requires the client to maintain its own gateway connection.
+
+### Surface
+
+```
+services/integrations/discord/gateway/
+├── client.py     — DiscordGatewayClient: WSS connect, IDENTIFY, heartbeat, RESUME
+├── dispatch.py   — handle_dispatch + handle_message_create (author.bot filter, tenant resolve, ingest)
+├── metrics.py    — 8 in-process counters/gauges scraped by structlog
+├── worker.py     — GatewayWorker: outer run_forever loop, backoff, SIGTERM
+└── tests/        — fake_gateway fixture + 4 test files
+scripts/run_discord_gateway_worker.py    — process entrypoint (mirrors run_think_worker.py)
+```
+
+### Distinct from IN-09
+
+| Aspect | IN-09 (Interactions HTTP) | IN-12 (Gateway WSS) |
+|---|---|---|
+| Transport | HTTPS webhook (we receive) | Persistent WSS (we connect) |
+| Auth | Ed25519 signature on each request | Bot token IDENTIFY once per session |
+| Coverage | Slash commands only | All guild messages (with author.bot filter) |
+| source_channel | `discord:interaction` | `discord:message` |
+| trust_tier | `attested_agent` | `attested_agent` (same — chat-platform convention) |
+
+### Reuses unchanged
+
+- `provider_installations` rows from IN-09's OAuth flow drive tenant resolution; the Gateway worker never writes to this table.
+- `services/ingestion/core.ingest()` is the single ingest entrypoint; dedup is via the existing `(source_channel, external_id, occurred_at)` unique index on `observations`.
+- `DISCORD_BOT_TOKEN` env var (same as IN-09's slash-command registration and outbound REST client).
+- `TenantResolver` from IN-07.
+
+### Key invariants
+
+1. **Author filter is structural**, not advisory. `author.bot` + `webhook_id` checks run BEFORE tenant resolution. This is the inbound-loop guard against IN-13 outbound replies: when IN-13 ships and Fyralis posts a message back to a channel, the resulting MESSAGE_CREATE will arrive at this worker; the filter drops it before any DB write.
+2. **No raw guild_id in logs** (SC-006 carried forward from IN-09). All log records use `short_guild_hash` (BLAKE2b 8-byte digest), `installation_row_id`, or `tenant_id`.
+3. **MESSAGE_CONTENT is privileged**. The worker exits fatally on close 4014 regardless of `FYRALIS_ENV` — no silent degradation. Operator must enable the intent in the Discord Developer Portal before deploy.
+4. **No new migrations, no new tables.** All observations land in the existing `observations` table; the new `discord:message` value is an application-layer convention.
+
+Spec: `specs/IN-12-discord-gateway-message-ingest/`.
+
+---
+
 This concludes the comprehensive architectural analysis. The codebase is well-structured for its phase (MVP/dogfood), with clear separation of concerns, extensive type safety (Pydantic), and intentional deferral of production concerns (auth, multi-tenancy UI, observability ingestion) to later waves.

@@ -51,50 +51,50 @@ Per Constitution §IX with no migrations, the foundational phase contains all th
 
 **Goal**: 24h+ stable connection with transparent reconnect.
 
-- [ ] T028 [US2] Create `services/integrations/discord/gateway/tests/test_client_lifecycle.py::test_hello_identify_ready_loop` — fake gateway responds with HELLO + READY; assert client captures `session_id`, sends heartbeat with correct op + interval, records `discord_gateway_connection_state{state="connected"}=1`.
-- [ ] T029 [US2] Add `test_heartbeat_ack_validation` to the same file — fake gateway sends op 11 ACK on schedule for 3 ticks then stops; assert client closes WSS with 4000 after 2 missed ticks and triggers reconnect.
-- [ ] T030 [US2] Create `services/integrations/discord/gateway/tests/test_client_reconnect.py::test_close_4000_triggers_resume` — fake gateway sends close 4000 mid-stream; assert client reopens to `resume_gateway_url`, sends RESUME with last_seq, dispatch loop continues without re-IDENTIFY.
-- [ ] T031 [P] [US2] Add `test_invalid_session_d_true_resumes` — INVALID_SESSION with `d=true` → RESUME on same session_id.
-- [ ] T032 [P] [US2] Add `test_invalid_session_d_false_full_reconnect` — INVALID_SESSION with `d=false` → fresh IDENTIFY with new session.
-- [ ] T033 [P] [US2] Add `test_close_4014_exits_fatal` — fake gateway sends close 4014; assert client returns from `run()` and `worker.run_forever()` exits 1 with `discord_gateway_close_fatal` log entry (Clarifications: no degraded mode regardless of FYRALIS_ENV).
-- [ ] T034 [US2] Add `test_no_observation_gap_through_resume` — fake gateway dispatches MESSAGE_CREATE A, close 4000, RESUME, dispatch MESSAGE_CREATE B; assert two observations exist, no duplicates.
-- [ ] T035 [P] [US2] Add `test_backoff_resets_on_ready` — simulate 3 consecutive connect failures (backoff 1 → 2 → 4 s), then a successful READY; next failure should backoff at 1 s, not 8 s.
+- [X] T028 [US2] Create `services/integrations/discord/gateway/tests/test_client_lifecycle.py::test_hello_identify_ready_loop` — fake gateway responds with HELLO + READY; assert client captures `session_id`, sends heartbeat with correct op + interval, records `discord_gateway_connection_state{state="connected"}=1`.
+- [X] T029 [US2] Add `test_heartbeat_ack_validation` to the same file — fake gateway sends op 11 ACK on schedule for 3 ticks then stops; assert client closes WSS with 4000 after 2 missed ticks and triggers reconnect.
+- [X] T030 [US2] Create `services/integrations/discord/gateway/tests/test_client_reconnect.py::test_close_4000_triggers_resume` — fake gateway sends close 4000 mid-stream; assert client reopens to `resume_gateway_url`, sends RESUME with last_seq, dispatch loop continues without re-IDENTIFY.
+- [X] T031 [P] [US2] Add `test_invalid_session_d_true_resumes` — INVALID_SESSION with `d=true` → RESUME on same session_id.
+- [X] T032 [P] [US2] Add `test_invalid_session_d_false_full_reconnect` — INVALID_SESSION with `d=false` → fresh IDENTIFY with new session.
+- [X] T033 [P] [US2] Add `test_close_4014_exits_fatal` — fake gateway sends close 4014; assert client returns from `run()` and `worker.run_forever()` exits 1 with `discord_gateway_close_fatal` log entry (Clarifications: no degraded mode regardless of FYRALIS_ENV).
+- [X] T034 [US2] Add `test_no_observation_gap_through_resume` — fake gateway dispatches MESSAGE_CREATE A, close 4000, RESUME, dispatch MESSAGE_CREATE B; assert two observations exist, no duplicates.
+- [X] T035 [P] [US2] Add `test_backoff_resets_on_ready` — simulate 3 consecutive connect failures (backoff 1 → 2 → 4 s), then a successful READY; next failure should backoff at 1 s, not 8 s.
 
 ## Phase 5 — User Story 3 (author.bot Filter, P2)
 
 **Goal**: Bot/webhook messages never produce observations.
 
-- [ ] T036 [US3] Create `services/integrations/discord/gateway/tests/test_dispatch_filters.py::test_author_bot_self_drops_silently` — payload with `author.bot=true, author.id=APPLICATION_ID` → zero observations, `discord_gateway_filtered_bot_total{source="self"}` increments by 1.
-- [ ] T037 [P] [US3] Add `test_author_bot_other_drops_silently` — `author.bot=true, author.id != APPLICATION_ID` → zero obs, `source="other_bot"`.
-- [ ] T038 [P] [US3] Add `test_webhook_id_drops_silently` — `webhook_id="123"`, `author.bot=false` → zero obs, `source="webhook"`.
-- [ ] T039 [P] [US3] Add `test_filter_runs_before_tenant_resolution` — payload with `author.bot=true` AND no known `provider_installations` row → the bot filter wins; `dropped_unknown_installation_total` does NOT increment (research R7: filter precedence).
+- [X] T036 [US3] Create `services/integrations/discord/gateway/tests/test_dispatch_filters.py::test_author_bot_self_drops_silently` — payload with `author.bot=true, author.id=APPLICATION_ID` → zero observations, `discord_gateway_filtered_bot_total{source="self"}` increments by 1.
+- [X] T037 [P] [US3] Add `test_author_bot_other_drops_silently` — `author.bot=true, author.id != APPLICATION_ID` → zero obs, `source="other_bot"`.
+- [X] T038 [P] [US3] Add `test_webhook_id_drops_silently` — `webhook_id="123"`, `author.bot=false` → zero obs, `source="webhook"`.
+- [X] T039 [P] [US3] Add `test_filter_runs_before_tenant_resolution` — payload with `author.bot=true` AND no known `provider_installations` row → the bot filter wins; `dropped_unknown_installation_total` does NOT increment (research R7: filter precedence).
 
 ## Phase 6 — User Story 4 (Unknown-Guild Silent Drop, P2)
 
 **Goal**: MESSAGE_CREATE from untracked guild drops silently with metric, no raw guild_id in logs.
 
-- [ ] T040 [US4] Add `test_unknown_guild_drops_silently` to `test_dispatch_filters.py` — guild_id with no `provider_installations` row → zero obs, `dropped_unknown_installation_total` increments.
-- [ ] T041 [P] [US4] Add `test_disabled_install_treated_as_unknown` — `provider_installations` row with `enabled=FALSE` → same path as no row.
-- [ ] T042 [P] [US4] Add `test_no_raw_guild_id_in_logs` — use `caplog` to capture all log records during an unknown-guild dispatch; assert the raw guild_id string does not appear in any record's message (SC-006 invariant).
-- [ ] T043 [P] [US4] Add `test_dm_message_drops_silently` — payload with no `guild_id` (DM context) → zero obs, `dispatch_total{event="MESSAGE_CREATE_DM"}` increments.
+- [X] T040 [US4] Add `test_unknown_guild_drops_silently` to `test_dispatch_filters.py` — guild_id with no `provider_installations` row → zero obs, `dropped_unknown_installation_total` increments.
+- [X] T041 [P] [US4] Add `test_disabled_install_treated_as_unknown` — `provider_installations` row with `enabled=FALSE` → same path as no row.
+- [X] T042 [P] [US4] Add `test_no_raw_guild_id_in_logs` — use `caplog` to capture all log records during an unknown-guild dispatch; assert the raw guild_id string does not appear in any record's message (SC-006 invariant).
+- [X] T043 [P] [US4] Add `test_dm_message_drops_silently` — payload with no `guild_id` (DM context) → zero obs, `dispatch_total{event="MESSAGE_CREATE_DM"}` increments.
 
 ## Phase 7 — User Story 5 (Operational Hardening, P3)
 
 **Goal**: Metrics observable, SIGTERM clean, no raw guild_id in any worker log path.
 
-- [ ] T044 [US5] Implement SIGTERM handler in `services/integrations/discord/gateway/worker.py` — `signal.signal(SIGTERM, _set_shutdown_flag)` synchronously sets an `asyncio.Event`; main loop checks flag, stops accepting new dispatches, awaits in-flight tasks, sends WSS close 1000, returns from `run_forever()` with exit code 0.
-- [ ] T045 [US5] Create `services/integrations/discord/gateway/tests/test_worker_shutdown.py::test_sigterm_drains_and_exits_zero` — start worker with fake gateway, dispatch 3 MESSAGE_CREATE events, send SIGTERM mid-stream; assert worker exits 0 within 5 s AND all 3 observations are committed.
-- [ ] T046 [P] [US5] Add `test_sigterm_caps_at_5_seconds` — inject a slow ingestion handler (await sleep 10 s); send SIGTERM; assert worker exits 0 at the 5 s cap and logs the in-flight count of abandoned tasks.
-- [ ] T047 [US5] Update `scripts/start.sh` (Phase 4 T042 in plan) to launch the new worker alongside `run_think_worker.py` and `run_post_commit_worker.py`; logfile `/tmp/fyralis_logs/discord_gateway_worker.log`; PID recorded in `/tmp/fyralis_stack.pids`.
+- [X] T044 [US5] Implement SIGTERM handler in `services/integrations/discord/gateway/worker.py` — `signal.signal(SIGTERM, _set_shutdown_flag)` synchronously sets an `asyncio.Event`; main loop checks flag, stops accepting new dispatches, awaits in-flight tasks, sends WSS close 1000, returns from `run_forever()` with exit code 0.
+- [X] T045 [US5] Create `services/integrations/discord/gateway/tests/test_worker_shutdown.py::test_sigterm_drains_and_exits_zero` — start worker with fake gateway, dispatch 3 MESSAGE_CREATE events, send SIGTERM mid-stream; assert worker exits 0 within 5 s AND all 3 observations are committed.
+- [X] T046 [P] [US5] Add `test_sigterm_caps_at_5_seconds` — inject a slow ingestion handler (await sleep 10 s); send SIGTERM; assert worker exits 0 at the 5 s cap and logs the in-flight count of abandoned tasks.
+- [X] T047 [US5] Update `scripts/start.sh` (Phase 4 T042 in plan) to launch the new worker alongside `run_think_worker.py` and `run_post_commit_worker.py`; logfile `/tmp/fyralis_logs/discord_gateway_worker.log`; PID recorded in `/tmp/fyralis_stack.pids`.
 
 ## Phase 8 — Polish & Regression
 
-- [ ] T048 [P] Append §16 to `CODEBASE-ARCHITECTURE.md` documenting the new `services/integrations/discord/gateway/` subpackage, the worker process, and the `discord:message` source_channel.
-- [ ] T049 [P] Run `pytest services/integrations/discord/gateway/tests/` — all new tests pass with real Postgres + real Ollama.
-- [ ] T050 [P] Run `pytest services/integrations/tests/ services/webhooks/tests/` — IN-08 + IN-09 suites pass byte-for-byte (SC-010 — no regressions).
-- [ ] T051 [P] Run `python scripts/check_schema_drift.py` — exit 0, zero new files in `db/migrations/` (SC-009).
-- [ ] T052 [P] Run `ruff check` on all changed paths under `services/integrations/discord/gateway/`, `services/ingestion/handlers/`, `scripts/`.
-- [ ] T053 [P] Run `git diff --stat integration/ingestion-hardening…HEAD` and verify the file inventory matches the "Files relevant" list in source.md (SC-010 hard check).
+- [X] T048 [P] Append §16 to `CODEBASE-ARCHITECTURE.md` documenting the new `services/integrations/discord/gateway/` subpackage, the worker process, and the `discord:message` source_channel.
+- [X] T049 [P] Run `pytest services/integrations/discord/gateway/tests/` — all new tests pass with real Postgres + real Ollama.
+- [X] T050 [P] Run `pytest services/integrations/tests/ services/webhooks/tests/` — IN-08 + IN-09 suites pass byte-for-byte (SC-010 — no regressions).
+- [X] T051 [P] Run `python scripts/check_schema_drift.py` — exit 0, zero new files in `db/migrations/` (SC-009).
+- [X] T052 [P] Run `ruff check` on all changed paths under `services/integrations/discord/gateway/`, `services/ingestion/handlers/`, `scripts/`.
+- [X] T053 [P] Run `git diff --stat integration/ingestion-hardening…HEAD` and verify the file inventory matches the "Files relevant" list in source.md (SC-010 hard check).
 
 ---
 

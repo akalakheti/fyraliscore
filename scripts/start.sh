@@ -157,6 +157,12 @@ log "Starting post-commit worker…"
   > "$LOGDIR/post_commit_worker.log" 2>&1 &
 record_pid $!
 
+log "Starting Discord gateway worker…"
+: > "$LOGDIR/discord_gateway_worker.log"
+.venv/bin/python scripts/run_discord_gateway_worker.py \
+  > "$LOGDIR/discord_gateway_worker.log" 2>&1 &
+record_pid $!
+
 log "Starting UI on :${UI_PORT}…"
 ( cd ui && npm run dev -- --host 127.0.0.1 --strictPort > "$LOGDIR/ui.log" 2>&1 ) &
 record_pid $!
