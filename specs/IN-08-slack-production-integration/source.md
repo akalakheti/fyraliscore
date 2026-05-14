@@ -99,3 +99,7 @@ Out of scope (follow-up tasks)
 App Home tab / slash commands / interactive components — track as IN-10 once Acts can emit Slack-outbound messages.
 Migrating GitHub / Linear / Stripe / Discord onto the same OAuth pattern — track as IN-09, IN-11, etc.; this task is Slack-only by design so the pattern can be validated end-to-end on one provider before generalising.
 Per-channel subscription management UI (which Slack channels Fyralis listens to) — Slack app-level scopes cover MVP.
+
+Estimated effort
+
+6 days (1.5 d Phase 1, 0.5 d Phase 2, 2 d Phase 3, 1 d Phase 4, 1 d Phase 5).

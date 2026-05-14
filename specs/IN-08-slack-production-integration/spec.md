@@ -234,6 +234,10 @@ These are the only files this feature may create or modify. Any divergence is a 
 
 New tests are *not* listed in `Files relevant` but are implicit per the constitution; new test files live under each touched service's `tests/` directory and are permitted.
 
+## Estimated Effort
+
+6 days total, per ClickUp: Phase 1 (1.5 d) → Phase 2 (0.5 d) → Phase 3 (2 d) → Phase 4 (1 d) → Phase 5 (1 d). The planner SHOULD schedule tasks in this dependency order; phases are independently deployable.
+
 ## Assumptions
 
 - Slack app registration (client_id, client_secret, signing secret for the *app* itself, not per-workspace) is provisioned out-of-band before merge and surfaced via deployment secrets (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`).
