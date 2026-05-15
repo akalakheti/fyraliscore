@@ -41,6 +41,7 @@ from lib.shared.types import ObservationKind, TrustTierValue
 CHANNEL_TRUST_MAP: dict[str, str] = {
     "slack:message": "attested_agent",
     "email:inbound": "attested_agent",
+    "gmail:": "attested_agent",
     "linear:webhook": "authoritative",
     "github:webhook": "authoritative",
     "calendar:sync": "authoritative",
@@ -152,6 +153,7 @@ def _clear_registry_for_tests() -> None:
 # imports intentionally come after _HANDLERS is defined above.
 from services.ingestion.handlers import system  # noqa: E402,F401
 from services.ingestion.handlers import slack  # noqa: E402,F401
+from services.ingestion.handlers import gmail  # noqa: E402,F401
 
 
 __all__ = [

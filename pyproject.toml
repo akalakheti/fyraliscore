@@ -22,6 +22,8 @@ dependencies = [
     "anthropic>=0.34",
     "openai>=1.40",
     "zstandard>=0.22",
+    "google-auth>=2.29",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

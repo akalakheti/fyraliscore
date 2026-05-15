@@ -2282,6 +2282,23 @@ async def _configure_ceo_view(app_: FastAPI, *, pool: asyncpg.Pool) -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("sim_mount_failed", error=str(exc))
 
+    # ---- 4.5 GMAIL — admin connect + Pub/Sub push webhook ----------
+    # Wired only when DWD credentials are configured. Skipping prevents
+    # noisy boot errors in dev when Gmail isn't yet provisioned.
+    if (
+        os.environ.get("GMAIL_SERVICE_ACCOUNT_JSON_FILE")
+        or os.environ.get("GMAIL_SERVICE_ACCOUNT_JSON")
+    ):
+        try:
+            from services.integrations.gmail.oauth import router as _gmail_oauth_router
+            from services.webhooks.gmail_pubsub import router as _gmail_pubsub_router
+
+            app_.include_router(_gmail_oauth_router)
+            app_.include_router(_gmail_pubsub_router)
+            log.info("gmail_routers_mounted")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("gmail_mount_failed", error=str(exc))
+
     # ---- 5. DEBUG — inspector router -------------------------------
     # Read-only endpoints for /debug UI: signals, think runs, models,
     # acts, renders, cache. Gated by COMPANY_OS_ENV so prod doesn't
