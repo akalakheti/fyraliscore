@@ -43,8 +43,8 @@ async def seeded_installation(db_pool):
     tenant_id = uuid7()
     await db_pool.execute(
         """
-        INSERT INTO tenants (id, slug, display_name)
-        VALUES ($1, $2, 'Test') ON CONFLICT (id) DO NOTHING
+        INSERT INTO tenants (id, name)
+        VALUES ($1, $2) ON CONFLICT (id) DO NOTHING
         """,
         tenant_id,
         f"t-{tenant_id.hex[:8]}",

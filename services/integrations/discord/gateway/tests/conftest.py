@@ -157,12 +157,15 @@ class FakeGateway:
         self._server: Any = None
         self._port: int = 0
         self._loop_task: asyncio.Task[None] | None = None
+        self._shutdown: asyncio.Event = asyncio.Event()
+        self._connections: set[Any] = set()
 
     @property
     def url(self) -> str:
         return f"ws://127.0.0.1:{self._port}"
 
     async def __aenter__(self) -> "FakeGateway":
+        self._shutdown = asyncio.Event()
         self._server = await websockets.serve(self._handler, "127.0.0.1", 0)
         for sock in self._server.sockets or []:
             self._port = sock.getsockname()[1]
@@ -170,58 +173,73 @@ class FakeGateway:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:
+        # Signal the parked handlers to exit, then force-close any
+        # connections still open before waiting on the server. Without
+        # this, handlers awaiting `asyncio.Event().wait()` would never
+        # return and `wait_closed()` would hang past the test timeout.
+        self._shutdown.set()
+        for ws in list(self._connections):
+            try:
+                await ws.close()
+            except Exception:
+                pass
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
 
     async def _handler(self, ws: Any) -> None:
-        # Send HELLO immediately.
-        await ws.send(json.dumps({
-            "op": 10,
-            "d": {"heartbeat_interval": self.heartbeat_interval_ms},
-        }))
-        # Receive IDENTIFY (or RESUME).
-        ident = json.loads(await ws.recv())
-        self.received.append(ident)
-        if ident.get("op") == 2:
-            await ws.send(json.dumps({
-                "op": 0,
-                "s": 1,
-                "t": "READY",
-                "d": {
-                    "session_id": "session_test_001",
-                    "resume_gateway_url": self.url,
-                    "application": {"id": _APPLICATION_ID},
-                },
-            }))
-        elif ident.get("op") == 6:
-            await ws.send(json.dumps({
-                "op": 0,
-                "s": (ident.get("d") or {}).get("seq", 0) + 1,
-                "t": "RESUMED",
-                "d": {},
-            }))
-
-        # Run the scripted events; concurrently absorb heartbeats and
-        # auto-ACK them.
-        recv_task = asyncio.create_task(self._absorb(ws))
+        self._connections.add(ws)
         try:
-            for action in self.script:
-                op = action.get("op")
-                if op == "send":
-                    await ws.send(json.dumps(action["frame"]))
-                elif op == "close":
-                    await ws.close(
-                        code=action["code"],
-                        reason=action.get("reason", ""),
-                    )
-                    return
-                elif op == "sleep":
-                    await asyncio.sleep(action["seconds"])
-            # Park forever until the test closes the server.
-            await asyncio.Event().wait()
+            # Send HELLO immediately.
+            await ws.send(json.dumps({
+                "op": 10,
+                "d": {"heartbeat_interval": self.heartbeat_interval_ms},
+            }))
+            # Receive IDENTIFY (or RESUME).
+            ident = json.loads(await ws.recv())
+            self.received.append(ident)
+            if ident.get("op") == 2:
+                await ws.send(json.dumps({
+                    "op": 0,
+                    "s": 1,
+                    "t": "READY",
+                    "d": {
+                        "session_id": "session_test_001",
+                        "resume_gateway_url": self.url,
+                        "application": {"id": _APPLICATION_ID},
+                    },
+                }))
+            elif ident.get("op") == 6:
+                await ws.send(json.dumps({
+                    "op": 0,
+                    "s": (ident.get("d") or {}).get("seq", 0) + 1,
+                    "t": "RESUMED",
+                    "d": {},
+                }))
+
+            # Run the scripted events; concurrently absorb heartbeats
+            # and auto-ACK them.
+            recv_task = asyncio.create_task(self._absorb(ws))
+            try:
+                for action in self.script:
+                    op = action.get("op")
+                    if op == "send":
+                        await ws.send(json.dumps(action["frame"]))
+                    elif op == "close":
+                        await ws.close(
+                            code=action["code"],
+                            reason=action.get("reason", ""),
+                        )
+                        return
+                    elif op == "sleep":
+                        await asyncio.sleep(action["seconds"])
+                # Park until __aexit__ flips the shutdown event so the
+                # server can close cleanly during fixture teardown.
+                await self._shutdown.wait()
+            finally:
+                recv_task.cancel()
         finally:
-            recv_task.cancel()
+            self._connections.discard(ws)
 
     async def _absorb(self, ws: Any) -> None:
         try:
