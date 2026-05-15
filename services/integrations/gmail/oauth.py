@@ -56,7 +56,7 @@ from services.integrations.gmail.client import (
     GoogleHttpClient,
 )
 from services.integrations.gmail.directory import enumerate_domain, resolve_inclusion
-from services.integrations.gmail.dwd import get_minter
+from services.integrations.gmail.dwd import DwdError, get_minter
 from services.integrations.gmail.optout import fetch_optout_emails
 from services.integrations.gmail.pubsub import PubsubAdmin
 from services.integrations.gmail.watch import activate_watch, upsert_pending_watch
@@ -112,7 +112,7 @@ async def connect_preflight(request: Request) -> JSONResponse:
             enumeration = await enumerate_domain(
                 directory, workspace_domain=workspace_domain,
             )
-        except GoogleApiError as exc:
+        except (GoogleApiError, DwdError) as exc:
             return JSONResponse(
                 status_code=400,
                 content={
