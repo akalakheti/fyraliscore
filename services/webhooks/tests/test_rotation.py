@@ -71,12 +71,18 @@ async def test_env_layout_parses_comma_separated(
 ) -> None:
     """The env-based secret store accepts comma-separated secrets,
     with optional `label=` prefix per entry, so a rotation can be
-    expressed without process restart."""
+    expressed without process restart.
+
+    Uses `slack` because IN-13 added a dedicated path for `github`
+    (App-level WEBHOOK_SECRET_GITHUB + _PREV; no comma list / no
+    per-tenant override). The legacy parser tested here is still
+    the resolution path for slack / discord / linear / stripe.
+    """
     monkeypatch.setenv(
-        "WEBHOOK_SECRET_GITHUB",
+        "WEBHOOK_SECRET_SLACK",
         "old=old-secret,new=new-secret",
     )
-    secrets = await load_secrets("github")
+    secrets = await load_secrets("slack")
     assert len(secrets) == 2
     labels = {s.label for s in secrets}
     values = {s.value for s in secrets}
@@ -86,8 +92,8 @@ async def test_env_layout_parses_comma_separated(
 
 @pytest.mark.asyncio
 async def test_env_layout_unlabelled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WEBHOOK_SECRET_GITHUB", "plain-secret")
-    secrets = await load_secrets("github")
+    monkeypatch.setenv("WEBHOOK_SECRET_SLACK", "plain-secret")
+    secrets = await load_secrets("slack")
     assert len(secrets) == 1
     assert secrets[0].label is None
     assert secrets[0].value == "plain-secret"
@@ -99,11 +105,28 @@ async def test_env_per_tenant_overrides_global(
 ) -> None:
     from uuid import UUID
 
-    monkeypatch.setenv("WEBHOOK_SECRET_GITHUB", "global-secret")
+    monkeypatch.setenv("WEBHOOK_SECRET_SLACK", "global-secret")
     tenant = UUID("00000000-0000-0000-0000-000000000001")
     monkeypatch.setenv(
-        f"WEBHOOK_SECRET_GITHUB__{tenant.hex.upper()}",
+        f"WEBHOOK_SECRET_SLACK__{tenant.hex.upper()}",
         "tenant-secret",
     )
-    secrets = await load_secrets("github", tenant_id=tenant)
+    secrets = await load_secrets("slack", tenant_id=tenant)
     assert [s.value for s in secrets] == ["tenant-secret"]
+
+
+@pytest.mark.asyncio
+async def test_github_app_level_current_and_previous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GitHub's IN-13 path: App-level current + optional previous secret
+    for rotation overlap. Not a comma list — separate env vars."""
+    monkeypatch.setenv("WEBHOOK_SECRET_GITHUB", "current-app-secret")
+    monkeypatch.setenv("WEBHOOK_SECRET_GITHUB_PREV", "previous-app-secret")
+    secrets = await load_secrets("github")
+    assert len(secrets) == 2
+    by_label = {s.label: s.value for s in secrets}
+    assert by_label == {
+        "app:current": "current-app-secret",
+        "app:previous": "previous-app-secret",
+    }
