@@ -5,6 +5,9 @@ import { test, expect } from "@playwright/test";
 // uses local sample data so no backend is involved.
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("demoSessionId", "e2e-fixture-session");
+  });
   await page.goto("/structure");
   await page.locator(".layer-strip").waitFor();
   // give the dot stagger animation a beat to finish

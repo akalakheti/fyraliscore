@@ -12,6 +12,9 @@ test.beforeEach(async ({ page, request }) => {
   // Reset mock conversation state so probe-id dedupe and exchange
   // ordering don't leak between tests.
   await request.post("/api/__test__/reset-conversations").catch(() => {});
+  await page.addInitScript(() => {
+    localStorage.setItem("demoSessionId", "e2e-fixture-session");
+  });
   await page.goto("/");
   await page.locator(".page-h1").waitFor();
 });

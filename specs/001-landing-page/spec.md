@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/landing-page`
 **Created**: 2026-05-15
-**Status**: Draft
+**Status**: Implemented
 **Input**: User description: "Build a public landing page for Fyraliscore — the organizational intelligence runtime. The landing page is what unauthenticated visitors see at the root path before they enter the demo or product cockpit. It must communicate what Fyralis is, who it's for, and the core value proposition. The page needs: a hero section with product name, tagline, and primary CTA buttons that route to the existing /demo flow and to the product cockpit; a features section describing the key capabilities (recommendation feed, multi-tenant gateway, integrations like Slack/Discord/GitHub, asynchronous reasoning workers); a how-it-works/architecture overview section; a footer with links to GitHub and documentation. Visual style should match the existing minimalist Fyralis cockpit aesthetic. The page must be implemented as a new React route, named LandingPage.tsx under ui/src/pages/, and wired into the router so unauthenticated/non-demo visitors land here by default."
 
 ## User Scenarios & Testing *(mandatory)*

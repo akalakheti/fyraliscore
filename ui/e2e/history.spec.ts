@@ -5,6 +5,9 @@ import { test, expect } from "@playwright/test";
 // data so no backend is involved.
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("demoSessionId", "e2e-fixture-session");
+  });
   await page.goto("/history");
   await page.locator(".layer-strip").waitFor();
   await page.waitForTimeout(900); // let staggered events settle

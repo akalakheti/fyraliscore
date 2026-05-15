@@ -5,6 +5,9 @@ import { test, expect } from "@playwright/test";
 // called out by FYRALIS_TODAY_SPEC.md §11 acceptance criteria.
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("demoSessionId", "e2e-fixture-session");
+  });
   await page.goto("/");
   await page.locator(".page-h1").waitFor();
 });

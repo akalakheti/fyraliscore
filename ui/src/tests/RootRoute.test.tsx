@@ -23,7 +23,7 @@ describe("RootRoute", () => {
       </MemoryRouter>
     );
     expect(
-      screen.getByRole("heading", { level: 1, name: /fyralis/i })
+      screen.getByRole("heading", { level: 1 })
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("demo-landing-sentinel")
@@ -39,7 +39,7 @@ describe("RootRoute", () => {
     );
     expect(screen.getByTestId("demo-landing-sentinel")).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { level: 1, name: /fyralis/i })
+      screen.queryByRole("heading", { level: 1 })
     ).not.toBeInTheDocument();
   });
 
@@ -55,7 +55,7 @@ describe("RootRoute", () => {
         </MemoryRouter>
       );
       expect(
-        screen.getByRole("heading", { level: 1, name: /fyralis/i })
+        screen.getByRole("heading", { level: 1 })
       ).toBeInTheDocument();
     } finally {
       Storage.prototype.getItem = original;

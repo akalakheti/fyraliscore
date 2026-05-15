@@ -1,6 +1,9 @@
 import { test } from "@playwright/test";
 
 test("dump expanded card html", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("demoSessionId", "e2e-fixture-session");
+  });
   await page.goto("/");
   await page.locator(".page-h1").waitFor();
   const card = page.locator("article.card").first();
