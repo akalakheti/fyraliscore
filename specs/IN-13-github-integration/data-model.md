@@ -4,10 +4,10 @@ This feature adds **one** column to one existing table. No new tables.
 
 ## Migration
 
-`db/migrations/0040_github_integration.sql`:
+`db/migrations/0042_provider_installations_selected_repositories.sql`:
 
 ```sql
--- 0040_github_integration.sql — IN-13
+-- 0042_provider_installations_selected_repositories.sql — IN-13
 -- Adds the per-installation repository selection allowlist for the
 -- GitHub App integration. NULL means "all repositories" (matches
 -- GitHub App's repository_selection='all' permission); a JSONB array
@@ -44,7 +44,7 @@ After this migration:
 | `tenant_id` | UUID FK → tenants(id) DEFERRABLE INITIALLY IMMEDIATE | unchanged |
 | `provider` | TEXT | accepts `'github'` (already in the IN-07 resolver's `ResolverProvider` literal) |
 | `installation_id` | TEXT | GitHub's numeric installation id, stringified |
-| `secret_ref` | TEXT | `'github:installation:<installation_id>'` (per-tenant) or `'github:app:webhook_master'` (master) — see research.md R3 |
+| `secret_ref` | TEXT | **NULL for GitHub rows** — the webhook secret is App-level, not per-installation (Clarifications Q1). Other providers may continue to set this. |
 | `enabled` | BOOLEAN | TRUE on install; flipped to FALSE on uninstall/suspend |
 | `installed_at` | TIMESTAMPTZ | unchanged |
 | **`selected_repositories`** | **JSONB DEFAULT NULL** | **NEW** — NULL = all repos; list = curated |
@@ -55,9 +55,8 @@ Existing index `idx_provider_installations_tenant_provider` — unchanged.
 
 ### `encrypted_secrets` (existing — IN-08)
 
-Two new logical keys (the table shape is unchanged):
-- `secret_ref='github:app:webhook_master'` — one row, persisted at App-creation time by an operator. Plaintext = the App-level webhook secret entered in GitHub's App settings UI. Encrypted under tenant-bound envelope key (the row is "owned" by the operator-tenant; reads via `secret_store.get(secret_ref, tenant_id=<operator>)`).
-- `secret_ref='github:installation:<installation_id>'` — one row per installation. Plaintext is identical to the master in v1 (per research.md R3); the per-tenant ciphertext distinction comes from envelope-encryption nonces being per-tenant. Created by the OAuth callback (T012, T043). Deleted by `_disable_and_zeroize_github` on uninstall.
+One new logical key (the table shape is unchanged):
+- `secret_ref='github:app:webhook_secret'` (or similar App-wide label) — single shared row, persisted at App-creation time by an operator. Plaintext = the App-level webhook secret entered in GitHub's App settings UI. Loaded via `load_secrets(provider='github', tenant_id=None, …)` for every inbound webhook verification. There is **no per-installation row**, per Clarifications Q1 (GitHub Apps do not support per-installation webhook secrets). On installation uninstall, NO secret deletion occurs — the App-level secret remains valid for any other installation of the same App.
 
 ### `installation_audit_log` (existing — IN-08)
 
@@ -92,8 +91,8 @@ No schema change. GitHub-sourced observations enqueue downstream triggers via th
 |---|---|---|
 | Resolve `(provider='github', installation.id)` → `(tenant_id, installation_row_id, secret_ref)` | existing `TenantResolver._resolve` (cache + DB) | every webhook delivery |
 | Load `selected_repositories` for repo-filter check | `SELECT selected_repositories FROM provider_installations WHERE id=$1` | every webhook delivery after tenant-resolve (FR-008b) |
-| Load `secret_ref` content for signature verification | existing `services/webhooks/secrets.py::load_secrets` | every webhook delivery |
-| Load App private key for JWT mint | `secret_store.get('github:app:private_key', operator_tenant_id)` OR env var `GITHUB_APP_PRIVATE_KEY_PEM` | every installation token mint |
+| Load App-level webhook secret for signature verification | existing `services/webhooks/secrets.py::load_secrets(provider='github', tenant_id=None, …)` | every webhook delivery |
+| Load App private key for JWT mint | env var `GITHUB_APP_PRIVATE_KEY` (multi-line PEM) OR `GITHUB_APP_PRIVATE_KEY_PATH` (file path); Clarifications Q3 — v1 is env-var-only, no secret-store path | every installation token mint |
 
 ## Write paths
 
@@ -101,11 +100,10 @@ No schema change. GitHub-sourced observations enqueue downstream triggers via th
 |---|---|---|
 | INSERT `oauth_install_states` (state token nonce) | existing IN-08 path | `/integrations/github/install` |
 | Atomic UPDATE `oauth_install_states` SET consumed=TRUE WHERE …  | existing IN-08 path | `/integrations/github/callback` start |
-| UPSERT `provider_installations` with `provider='github'`, full row | application-level upsert via `INSERT … ON CONFLICT (provider, installation_id) DO UPDATE …` | `/integrations/github/callback` success |
-| INSERT `encrypted_secrets` row for `github:installation:<id>` | `secret_store.put(secret_ref, plaintext, tenant_id)` | `/integrations/github/callback` success |
+| UPSERT `provider_installations` with `provider='github'`, full row (secret_ref=NULL for GitHub rows) | application-level upsert via `INSERT … ON CONFLICT (provider, installation_id) DO UPDATE …` | `/integrations/github/callback` success |
 | INSERT `installation_audit_log` row | application-level INSERT | every install/uninstall/lifecycle transition |
-| UPDATE `provider_installations` SET enabled=FALSE WHERE id=$1 | inside `_disable_and_zeroize_github` | uninstall chokepoint |
-| DELETE `encrypted_secrets` row | `secret_store.delete(secret_ref, tenant_id)` | uninstall chokepoint |
+| UPDATE `provider_installations` SET enabled=FALSE WHERE id=$1 | inside `_disable_github_installation` | uninstall chokepoint |
+| Invalidate in-process installation-access-token cache entry | `GithubClient.invalidate(installation_id)` | uninstall chokepoint (replaces the prior "DELETE encrypted_secrets" step — no per-installation secret exists to delete) |
 | UPDATE `provider_installations` SET selected_repositories=$1 WHERE id=$2 | inside `handle_installation_repositories_event` | every `installation_repositories` webhook |
 
 ## State transitions for `provider_installations(provider='github')`
@@ -140,15 +138,18 @@ No schema change. GitHub-sourced observations enqueue downstream triggers via th
              │     OR outbound 401/404
              ▼
        ┌────────────────────────────────────────────┐
-       │  enabled=FALSE, secret_ref content deleted │
+       │  enabled=FALSE                             │
+       │  (in-process token cache invalidated;      │
+       │   App-level webhook secret untouched)      │
        └──────────────────┬─────────────────────────┘
                           │
               Re-install: OAuth callback
                           │
                           ▼
        ┌────────────────────────────────────────────┐
-       │  enabled=TRUE, new secret_ref content      │
-       │  (same row id reused, audit chain preserved)│
+       │  enabled=TRUE                              │
+       │  (same row id reused, audit chain preserved;│
+       │   no secret rotation — secret is App-level)│
        └────────────────────────────────────────────┘
 ```
 
@@ -157,7 +158,7 @@ No schema change. GitHub-sourced observations enqueue downstream triggers via th
 1. **Same OAuth state token consumed twice → same outcome**: nonce-consume is an atomic UPDATE; the second consumer sees the prior consumption and 302s to `install-error?reason=state_consumed`. (FR-002, SC-009)
 2. **Same `installation_id` re-installed by same tenant → row id preserved**: UPSERT on `(provider, installation_id)`; no duplicate row. (FR-006)
 3. **Cross-tenant rebind → rejected**: UPSERT detects tenant_id mismatch, raises `GithubInstallationCollisionError`. (FR-005, SC-009)
-4. **Concurrent uninstall paths (webhook + outbound 404) → single end state, idempotent audit**: `UPDATE … SET enabled=FALSE` is idempotent; `secret_store.delete` suppresses `SecretNotFoundError` on second invocation; two audit rows accepted (FR-013, SC-005).
+4. **Concurrent uninstall paths (webhook + outbound 404) → single end state, idempotent audit**: `UPDATE … SET enabled=FALSE` is idempotent; token-cache invalidate is a no-op on missing key; two audit rows accepted (FR-013, SC-005). No secret-store delete — the secret is App-level (Clarifications Q1).
 5. **Same `installation_repositories.added` webhook redelivered → idempotent**: the merge is a set-union; re-applying produces the same final state.
 
 ## Tenant scoping
