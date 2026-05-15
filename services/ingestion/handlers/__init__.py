@@ -41,6 +41,7 @@ from lib.shared.types import ObservationKind, TrustTierValue
 CHANNEL_TRUST_MAP: dict[str, str] = {
     "slack:message": "attested_agent",
     "email:inbound": "attested_agent",
+    "gmail:": "attested_agent",
     "linear:webhook": "authoritative",
     "github:webhook": "authoritative",
     "calendar:sync": "authoritative",
@@ -159,6 +160,7 @@ from services.ingestion.handlers import github  # noqa: E402,F401
 from services.ingestion.handlers import linear  # noqa: E402,F401
 from services.ingestion.handlers import stripe  # noqa: E402,F401
 from services.ingestion.handlers import discord  # noqa: E402,F401
+from services.ingestion.handlers import gmail  # noqa: E402,F401
 
 
 __all__ = [
