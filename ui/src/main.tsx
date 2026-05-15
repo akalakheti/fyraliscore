@@ -1,8 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import DemoLanding from "./pages/DemoLanding";
 import DemoPicker from "./pages/DemoPicker";
+import RootRoute from "./pages/RootRoute";
 import Structure from "./pages/Structure";
 import History from "./pages/History";
 import MyMind from "./pages/MyMind";
@@ -24,7 +24,7 @@ ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<DemoLanding />} />
+        <Route path="/" element={<RootRoute />} />
         <Route path="/demo" element={<DemoPicker />} />
         <Route path="/structure" element={<Structure />} />
         <Route path="/history" element={<History />} />
