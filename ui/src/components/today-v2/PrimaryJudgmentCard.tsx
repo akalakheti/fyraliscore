@@ -1,27 +1,34 @@
 // Primary Judgment card — spec §5.3. The hero of Briefing Mode.
 // Shows: type label, status chip, title, summaryLine + keyMetrics,
 // whyThisMatters block, mini-diff, impactIfAccepted checklist,
-// and an actions row. Clicking the card enters Focused Review Mode.
+// and an actions row. An inline expansion reveals the full evidence
+// quality breakdown, missing context, and related model links so the
+// user never has to leave the page to drill in.
 
 import type { DecisionDelta } from "@/api/today-page-types";
 import { StatusChip } from "./StatusChip";
 import { MiniDiff } from "./MiniDiff";
+import { InlineDetail } from "./InlineDetail";
 
 interface Props {
   delta: DecisionDelta;
-  onOpen: () => void;
   onAccept: () => void;
   onDelegate: () => void;
   onCorrect: () => void;
+  onOpenEvidence: () => void;
+  onToggleExpand: () => void;
+  expanded: boolean;
   applying?: boolean;
 }
 
 export function PrimaryJudgmentCard({
   delta,
-  onOpen,
   onAccept,
   onDelegate,
   onCorrect,
+  onOpenEvidence,
+  onToggleExpand,
+  expanded,
   applying = false,
 }: Props) {
   // Primary action varies by status (spec §5.3). Monitoring & delegated
@@ -34,6 +41,7 @@ export function PrimaryJudgmentCard({
 
   const cardClass = [
     "tdv2-primary",
+    expanded ? "tdv2-primary--expanded" : "",
     isDelegatable ? "tdv2-primary--delegatable" : "",
     isMonitoring ? "tdv2-primary--monitoring" : "",
     delta.status === "contested" || delta.status === "correction_submitted"
@@ -53,8 +61,17 @@ export function PrimaryJudgmentCard({
       <button
         type="button"
         className="tdv2-primary__title-btn"
-        onClick={onOpen}
-        style={{ background: "transparent", border: "none", padding: 0, textAlign: "left", cursor: "pointer", color: "inherit" }}
+        onClick={onToggleExpand}
+        aria-expanded={expanded}
+        aria-controls={`primary-detail-${delta.id}`}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          textAlign: "left",
+          cursor: "pointer",
+          color: "inherit",
+        }}
         data-testid="primary-judgment-open"
       >
         <h2 className="tdv2-primary__title">{delta.title}</h2>
@@ -70,7 +87,11 @@ export function PrimaryJudgmentCard({
             <span
               key={i}
               className={`tdv2-metric${
-                m.severity === "critical" ? " tdv2-metric--critical" : m.severity === "high" ? " tdv2-metric--high" : ""
+                m.severity === "critical"
+                  ? " tdv2-metric--critical"
+                  : m.severity === "high"
+                    ? " tdv2-metric--high"
+                    : ""
               }`}
             >
               {m.label}
@@ -100,13 +121,32 @@ export function PrimaryJudgmentCard({
               <li key={i.id} className="tdv2-impact__item">
                 <span className="tdv2-impact__check" aria-hidden="true">
                   <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                    <path d="M1.5 4.2L3 5.7l3.5-3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M1.5 4.2L3 5.7l3.5-3.5"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                 </span>
                 <span>{i.text}</span>
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+
+      {expanded ? (
+        <div
+          id={`primary-detail-${delta.id}`}
+          className="tdv2-primary__details"
+        >
+          <InlineDetail
+            delta={delta}
+            onOpenEvidence={onOpenEvidence}
+            hideDiff
+          />
         </div>
       ) : null}
 
@@ -163,8 +203,17 @@ export function PrimaryJudgmentCard({
         <button
           type="button"
           className="tdv2-btn tdv2-btn--tertiary"
-          onClick={onOpen}
+          onClick={onToggleExpand}
+          aria-expanded={expanded}
           data-testid="primary-review"
+        >
+          {expanded ? "Show less" : "Show more detail"}
+        </button>
+        <button
+          type="button"
+          className="tdv2-btn tdv2-btn--tertiary"
+          onClick={onOpenEvidence}
+          data-testid="primary-review-evidence"
         >
           Review evidence
         </button>

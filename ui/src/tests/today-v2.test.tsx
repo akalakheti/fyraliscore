@@ -105,30 +105,78 @@ describe("Today Briefing Mode", () => {
     expect(screen.getByTestId("status-chip-needs_authority")).toBeInTheDocument();
   });
 
-  it("clicking the primary judgment title navigates to focused review", async () => {
+  it("clicking the primary judgment title expands the card inline (no navigation)", async () => {
     const user = userEvent.setup();
     renderBriefing();
     await waitFor(() => screen.getByTestId("primary-judgment-open"));
+    // Before click: extra detail panel is hidden.
+    expect(
+      screen.queryByTestId(/^inline-detail-/),
+    ).not.toBeInTheDocument();
     await user.click(screen.getByTestId("primary-judgment-open"));
+    // After click: inline detail appears in the same card; we are
+    // still on the briefing page (no navigation to focused review).
     await waitFor(() =>
-      expect(screen.getByTestId("focused-review-card")).toBeInTheDocument(),
+      expect(
+        screen.getByTestId("inline-detail-delta-primary-001"),
+      ).toBeInTheDocument(),
     );
+    expect(screen.queryByTestId("focused-review-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("today-page")).toBeInTheDocument();
   });
 
-  it("clicking an Other Judgment row navigates to focused review for that delta", async () => {
+  it("clicking an Other Judgment row expands it inline (no navigation)", async () => {
     const user = userEvent.setup();
     renderBriefing();
     await waitFor(() => screen.getByTestId("other-judgment-panel"));
     const pricingRow = screen.getByTestId("other-row-delta-other-pricing");
     await user.click(pricingRow);
+    // Inline detail appears for that delta only.
     await waitFor(() =>
-      expect(screen.getByTestId("focused-review-card")).toBeInTheDocument(),
+      expect(
+        screen.getByTestId("inline-detail-delta-other-pricing"),
+      ).toBeInTheDocument(),
     );
+    // Still on the briefing — no navigation.
+    expect(screen.queryByTestId("focused-review-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("today-page")).toBeInTheDocument();
+    // Card title remains visible above the expansion.
     expect(
-      within(screen.getByTestId("focused-review-card")).getByText(
+      within(screen.getByTestId("other-card-delta-other-pricing")).getByText(
         /Assign owner for pricing model decision/i,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("clicking the same Other Judgment row again collapses it", async () => {
+    const user = userEvent.setup();
+    renderBriefing();
+    await waitFor(() => screen.getByTestId("other-judgment-panel"));
+    const row = screen.getByTestId("other-row-delta-other-pricing");
+    await user.click(row);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("inline-detail-delta-other-pricing"),
+      ).toBeInTheDocument(),
+    );
+    await user.click(row);
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("inline-detail-delta-other-pricing"),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("Primary 'Review evidence' opens the evidence drawer in place (no navigation)", async () => {
+    const user = userEvent.setup();
+    renderBriefing();
+    await waitFor(() => screen.getByTestId("primary-review-evidence"));
+    await user.click(screen.getByTestId("primary-review-evidence"));
+    await waitFor(() =>
+      expect(screen.getByTestId("evidence-drawer")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("focused-review-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("today-page")).toBeInTheDocument();
   });
 
   it("Accept change button triggers applyDelta", async () => {

@@ -132,19 +132,22 @@
 }
 
 /* =================================================================== */
-/* Two-column briefing body                                             */
+/* Briefing body                                                        */
+/* Single vertical column — primary card on top, other-judgment         */
+/* accordion below, then "handled without you". Inline expansion keeps  */
+/* the user's scroll position anchored.                                 */
 /* =================================================================== */
 
 .tdv2-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--space-6);
-  align-items: start;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
 }
 
-@media (max-width: 1100px) {
-  .tdv2-body { grid-template-columns: 1fr; }
-}
+.tdv2-body--stack > * { width: 100%; }
 
 /* =================================================================== */
 /* Primary Judgment card (spec §5.3)                                    */
@@ -399,30 +402,77 @@
   font-weight: 500;
 }
 
-/* Other-judgment rows ---------------------------------------------- */
+/* Other-judgment accordion ----------------------------------------- */
 
-.tdv2-other-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.tdv2-other-list { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.tdv2-other-card {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-canvas);
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+.tdv2-other-card:hover { border-color: var(--accent-trust); }
+.tdv2-other-card--expanded {
+  background: var(--bg-elevated);
+  border-color: var(--accent-trust);
+  box-shadow: 0 6px 20px rgba(7, 23, 19, 0.08);
+}
+
 .tdv2-other-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: var(--space-3);
+  gap: var(--space-4);
   align-items: center;
-  padding: var(--space-3) var(--space-3);
-  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.15s ease, border-color 0.15s ease;
   width: 100%;
+  transition: background 0.15s ease;
 }
-.tdv2-other-row:hover { background: var(--color-moon-paper); border-color: var(--border-default); }
-.tdv2-other-row:focus-visible { outline: 2px solid var(--accent-trust); outline-offset: 1px; }
-.tdv2-other-row__title { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.3; margin-bottom: 4px; }
-.tdv2-other-row__summary { font-size: 12px; color: var(--text-muted); line-height: 1.3; }
+.tdv2-other-row:hover { background: rgba(174, 183, 155, 0.06); }
+.tdv2-other-row:focus-visible {
+  outline: 2px solid var(--accent-trust);
+  outline-offset: -2px;
+}
+.tdv2-other-row__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  margin-bottom: 4px;
+  letter-spacing: -0.005em;
+}
+.tdv2-other-row__summary { font-size: 13px; color: var(--text-muted); line-height: 1.4; }
 .tdv2-other-row__metrics { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-.tdv2-other-row__chev { color: var(--text-muted); }
+.tdv2-other-row__chev {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+}
+.tdv2-other-row__caret {
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+.tdv2-other-row__caret--up { transform: rotate(180deg); }
+
+.tdv2-other-card__body {
+  padding: 0 var(--space-5) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  animation: tdv2-accordion-in 200ms ease-out;
+}
+@keyframes tdv2-accordion-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* Handled Without You panel ---------------------------------------- */
 
@@ -439,6 +489,33 @@
   color: var(--accent-trust);
   text-decoration: none;
   font-weight: 500;
+}
+
+/* =================================================================== */
+/* Inline detail (used inside expanded primary + accordion rows)        */
+/* =================================================================== */
+
+.tdv2-inline-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.tdv2-inline-detail__source {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.tdv2-primary--expanded {
+  box-shadow: 0 8px 28px rgba(7, 23, 19, 0.08);
+}
+.tdv2-primary__details {
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--border-default);
+  animation: tdv2-accordion-in 200ms ease-out;
 }
 
 /* =================================================================== */
