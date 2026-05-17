@@ -27,6 +27,7 @@ dependencies = [
     "pyjwt[crypto]>=2.8",        # IN-13: GitHub App JWT (RS256) minting
     "zstandard>=0.22",           # Gmail/general payload compression
     "google-auth>=2.29",         # IN-Gmail: Google OAuth/OIDC verification
+    "redis>=5.0",                # M1.3: rate limiter (Lua EVALSHA on Redis); LLD §13
 ]
 
 [project.optional-dependencies]
@@ -41,6 +42,7 @@ dev = [
     "scikit-learn>=1.4",        # transitive via hdbscan; used by precipitation
     "numpy>=2.0",               # transitive; model-embedding stacking
     "pyyaml>=6.0",              # real-LLM scenario YAML loader
+    "fakeredis[lua]>=2.20",     # M1.3: in-process Redis with Lua EVALSHA support
 ]
 
 [tool.setuptools.packages.find]
