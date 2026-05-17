@@ -1,10 +1,14 @@
 # Fyralis Ingestion — Implementation Plan
 
+**Canonical reference:** `00-system-design.md` is the source of truth for architectural intent and non-negotiables N1–N5. Every milestone below names which non-negotiables it discharges. **A milestone cannot be cut in scope below the point where one of its named non-negotiables is no longer satisfied.** This is the test for "is this trim acceptable?"
+
 **Scope:** Sequenced migration from the current forward-only webhook/poller code (Phase 1 state) to the Temporal + Kafka + S3 + Redis backfill architecture specified in `02-high-level-design.md` v2.1 and `03-low-level-design.md` v3.1.
 
-**Read first:** this plan assumes familiarity with the HLD and LLD. It does not re-explain architecture; it sequences the work, names what blocks what, and identifies the tests that gate each milestone.
+**Read first:** this plan assumes familiarity with the canonical doc (00), HLD (02), and LLD (03). It does not re-explain architecture; it sequences the work, names what blocks what, and identifies the tests that gate each milestone.
 
 **Status of this plan:** the milestones are ordered by hard dependency (substrate before workflows; workflows before cutover; cutover before backfill). The effort estimates (S/M/L) are eyeball numbers, not story points — they communicate relative cost, not absolute schedule. Phase 4 implementation will reveal sequencing decisions that need revision; this plan should be re-validated at the start of each milestone.
+
+*Coherence audit (v4.1 amendment): each milestone now declares which N1–N5 non-negotiables it discharges. This makes scope-cuts auditable against `00-system-design.md` §2.*
 
 ---
 
@@ -140,6 +144,8 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 
 ### M1 — Foundational substrate
 
+**Discharges non-negotiables:** none directly (foundational substrate). Enables all subsequent N1–N5 work; M1 is the gate without which no later milestone can deliver an N.
+
 **Outcome:** all infra is provisioned, all new tables exist, the pgbouncer + statement_cache_size change ships, and a no-op normalizer/writer process pair runs against an empty Kafka topic without errors. Zero user-visible behavior change.
 
 **Changes:**
@@ -166,6 +172,8 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 
 ### M2 — Raw tier shadow path
 
+**Discharges non-negotiables:** N2 (Replayable from raw — every webhook body lands in S3 before transformation), N5 (Webhook and backfill converge — webhooks write to the same `ingestion.raw` topic that backfill will use). Tests gated by 48-hour zero-divergence comparison establish the shadow-path correctness foundation N1 depends on at M5.
+
 **Outcome:** the webhook router writes every received payload to S3 AND publishes to `ingestion.raw`, **in addition to** calling the existing inline `ingest()`. A no-op normalizer + writer pair consumes the topic but does NOT write observations (write path is feature-flagged off). Operationally invisible to users; ops sees S3 fills and Kafka consumer-group lag stays at zero.
 
 **Changes:**
@@ -191,6 +199,8 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 
 ### M3 — Embedding worker (decoupled)
 
+**Discharges non-negotiables:** N1 (Never lose data — fixes the `embedding_pending=TRUE` orphan accumulation identified in Phase 1 Risk #6; without a worker, observations land in DB but stay invisible to retrieval). N3 partial (separate Kafka topic isolates embedding work from observation-write work; one cannot starve the other).
+
 **Outcome:** the new Kafka-based embedding worker is live; new observations from the existing inline path get embedded via the new worker (the existing inline-embedding code is left in place, but the worker is the primary). The pre-existing `embedding_pending=TRUE` backlog gets backfilled by a one-shot script.
 
 **Changes:**
@@ -212,6 +222,8 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 ---
 
 ### M4 — Discord Gateway leader election + session persistence
+
+**Discharges non-negotiables:** N1 (Never lose data — fixes the in-memory `session_id`/`seq` data-loss window identified in Phase 1 Risk #3). N3 partial (Redis lease prevents multi-pod IDENTIFY collisions; one pod's crash does not affect others).
 
 **Outcome:** the Discord Gateway worker holds a Redis lease before establishing a WS session; on every dispatched frame, it UPSERTs `gateway_session_state`. On worker crash, the new leader reads the persisted `session_id`/`seq` and RESUMEs. Pod scale-up no longer doubles IDENTIFY traffic.
 
@@ -235,6 +247,8 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 ---
 
 ### M5 — Steady-state cutover (the riskiest milestone)
+
+**Discharges non-negotiables:** N1 (cutover with observation UNIQUE protecting against double-ingest; circuit breaker auto-reverts under sustained lag → no data loss during regression), N3 (per-tenant cutover flag + circuit breaker means one tenant's lag cannot affect another's flag state), N5 (webhook path becomes the Kafka path; convergence at `ingestion.raw` becomes live). **This is the milestone where N1 transitions from "design property" to "tested property of the running system."** Pre-cutover gates listed below are the proof of N1; do not weaken them.
 
 **Outcome:** for tenants with `ingestion.kafka_path_enabled=TRUE`, the webhook router writes to Kafka and returns 202; the inline `ingest()` is NOT called. The writer pool becomes the sole observation writer. The circuit breaker monitors lag and auto-flips the flag back on sustained breach.
 
@@ -268,6 +282,8 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 ---
 
 ### M6 — Backfill rollout per source
+
+**Discharges non-negotiables:** N1 (cursor-data ordering invariant becomes a tested property; `test_advance_cursor_atomic_with_kafka_publish` is the gate), N4 (`feels_onboarded` content-based event becomes a user-facing reality; recency-first planning materializes), N3 (per-source planner + per-tenant rate buckets enforce isolation under backfill load).
 
 **Outcome:** new installs trigger `TenantOnboardingWorkflow`; backfill runs to completion; reconciliation closes coverage gaps; `feels_onboarded` events fire; existing tenants get an opt-in "backfill now" admin action. Rollout per source in order: Gmail → GitHub → Slack → Discord.
 

@@ -1,8 +1,12 @@
 # Fyralis Ingestion — High-Level Design
 
+**Canonical reference:** `00-system-design.md` is the source of truth for architectural intent and non-negotiables (N1–N5). This document interprets that intent into a deployable shape; where the two disagree, `00` arbitrates (see §17 of the canonical doc).
+
 **Scope:** Production-grade backfill ingestion pipeline for Slack, GitHub, Discord, Gmail. Adopts the Temporal + Kafka + S3 + Redis stack mandated by the brief. Designed for full-history backfill with a recency-first "feels onboarded" moment in ≤15 minutes, plus steady-state webhook/gateway ingestion converged onto the same data plane. Brownfield: existing handlers, OAuth substrate, and observation schema are preserved; everything else around them is reshaped.
 
 *Version 2.1 — incorporates verification corrections from Group A (UNIQUE index retraction), Group C (content-based feels_onboarded), and Groups D/E/F/G (deferred decisions and omissions). See git history for v2.0.*
+
+*Coherence audit (v2.2 amendment): Component Inventory updated to correctly attribute `source.onboarding.feels_onboarded` emission to `FeelsOnboardedMonitorWorkflow` (added as a new row), not to `SourceOnboardingWorkflow`. This aligns with LLD §2.6 and the Phase 3.1 push-5 decision.*
 
 This document answers **why this shape?** Implementation specifics (DDL, activity step-by-step, code shapes) live in `03-low-level-design.md`.
 
@@ -119,7 +123,8 @@ The **downstream layer** is unchanged in shape: existing `NOTIFY observations_ne
 | Component | Responsibility | Tech | Scales with |
 |---|---|---|---|
 | `TenantOnboardingWorkflow` | Orchestrate per-tenant install: fan out to all enabled sources, emit `tenant.onboarding.started` and `…complete` progress events | Temporal Python SDK | # tenants installing concurrently |
-| `SourceOnboardingWorkflow` | Per (tenant, source): run planner, spawn `ShardFetchWorkflow` children, run reconciler, emit `source.onboarding.feels_onboarded` and `…complete` | Temporal | # active source installs |
+| `SourceOnboardingWorkflow` | Per (tenant, source): run planner, spawn `ShardFetchWorkflow` children, run reconciler, emit `source.onboarding.complete` (the `feels_onboarded` event is emitted by `FeelsOnboardedMonitorWorkflow` — see next row) | Temporal | # active source installs |
+| `FeelsOnboardedMonitorWorkflow` | Externalised per-source feels-onboarded check on a 30s Temporal Schedule. Scans active `onboarding_runs`, measures source-side vs observation-side count gap per source, atomically UPDATEs `onboarding_runs.feels_onboarded_at` and emits `source.onboarding.feels_onboarded` once per (run, source). Keeps `SourceOnboardingWorkflow` history bounded by shard count, not elapsed time. | Temporal Schedule | constant: scans all active runs every 30s |
 | `ShardFetchWorkflow` | Drive one shard from start cursor → done; sequence FetchPage / PersistRaw / Publish / AdvanceCursor activities | Temporal | # in-flight shards (concurrency-capped per tenant) |
 | Source planners (`slack`, `github`, `discord`, `gmail`) | Discover shards from source state (channels / repos / mailboxes / guild channels), assign recency score, write `onboarding_shards` rows | Python coroutines invoked as Temporal activities | source state size (one-shot at workflow start) |
 | Fetcher activities (per source) | Single API call → return (page_body, next_cursor, retry_after_hint) | aiohttp/httpx, called inside Temporal activity | rate-bucket headroom + source RPS |

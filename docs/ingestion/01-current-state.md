@@ -1,5 +1,7 @@
 # Current State of Fyralis Ingestion
 
+**Canonical reference:** `00-system-design.md` is the target architectural intent (non-negotiables N1–N5). This document maps the *gap* between what exists today and that intent. Each risk identified here will be addressed by a milestone in `04-implementation-plan.md` that discharges one or more non-negotiables.
+
 **Scope:** Faithful map of the ingestion code as it exists on branch `integration/ingestion-hardening`, commit `c35c5c8`. No proposed changes in this document — design decisions land in `02-high-level-design.md` after Phase 1 sign-off.
 
 **Frame to set before reading:** the prompt for this exercise references a "backfill ingestion pipeline" — that is what we are designing *toward*. **What exists today is fundamentally not that.** Three of the four sources (Slack, GitHub, Discord) are pure webhook-pushed, forward-only systems with no historical fetch at all. Gmail is the only source with a fetcher, and it is forward-only too (it starts at the `historyId` returned by the first watch). The "current state" sections below describe the live code; Phase 2 will be where the gap to a backfill system is named.

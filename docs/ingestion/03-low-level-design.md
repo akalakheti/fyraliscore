@@ -1,5 +1,7 @@
 # Fyralis Ingestion — Low-Level Design
 
+**Canonical reference:** `00-system-design.md` is the source of truth for architectural intent and non-negotiables (N1–N5). This document is the implementation-level interpretation of that intent. Every concrete decision below must serve N1–N5; if it appears not to, `00` arbitrates.
+
 **Scope:** Implementation reference for the ingestion pipeline whose shape was established in `02-high-level-design.md` v2.1. An engineer should be able to open this document, pick a section, and produce code that matches the LLD's contracts without further architectural questions.
 
 This document answers **exactly how do I build it?** Sections are numbered 1–10 per the Phase 3 brief, with three appended sections (11, 12, 13) covering Block 3 additions that did not fit cleanly into the original ten.
@@ -7,6 +9,8 @@ This document answers **exactly how do I build it?** Sections are numbered 1–1
 **Status of claims:** code-cited claims about existing behavior are evidence-based (Phase 1 + verification rounds). DDL, workflow code shapes, pseudocode, and topology specifications are forward-looking *design*: they have not been implemented or tested. The brief assigns the LLD this responsibility deliberately — Phase 4 implementation work will reveal places where this design needs revision.
 
 **Naming convention:** new code lives under `services/ingestion/` and new tables under migrations `0045`+ (next free number; latest is `0044_fix_installation_audit_log_action_check.sql`).
+
+*Coherence audit (v3.2 amendment): §3.1 Slack planner narrative corrected to match the `exp(-age_days / 7)` code (previously described a halving-per-bucket scheme inconsistent with the exponential decay actually implemented).*
 
 ---
 
@@ -1049,7 +1053,7 @@ The planner is one activity per source. Its job: take the install metadata, prod
 
 **Discovery:** list channels via `conversations.list` paginated. Default scope is public; admin choice (private + DM) future-flagged. The planner uses the bot token from `encrypted_secrets`.
 
-**Shard decomposition:** one shard per channel, time-windowed in 30-day buckets. Most-recent bucket (last 30 days) gets recency_score 1.0; each older bucket halves. For a 2-year-old channel, that's ~24 shards.
+**Shard decomposition:** one shard per channel, time-windowed in 30-day buckets. Recency score is `exp(-age_days / 7)` with `age_days` = days from `now` to the bucket's `window_end`; the most-recent bucket (`age_days ≈ 0`) scores ~1.0, the bucket starting 30 days ago scores ~0.013, and bucket scores decay exponentially with a 7-day half-life. For a 2-year-old channel, that's ~24 shards, the recent few dominating the priority order. (`τ = 7` matches Discord and Gmail; GitHub uses `τ = 14` because GitHub recency value decays more slowly — see §3.2.)
 
 ```python
 async def plan_shards_slack(args: PlanShardsArgs) -> ShardManifest:
