@@ -7,6 +7,9 @@ Verifies the shadow block added to
     S3 + Kafka with ingress_kind="gateway".
   - Shadow-write failure does NOT break frame dispatch — the inline
     observation is still written, and the function still returns.
+  - The canonical-JSON bytes the shadow path writes round-trip
+    losslessly through the Discord message handler — protects N2
+    (replay-from-raw) and content_hash dedup determinism.
 
 These exercise the full dispatch → ingest → shadow path against a
 real test Postgres (`fresh_db`) — the test mirrors
@@ -24,8 +27,10 @@ import asyncpg
 import pytest
 
 from services.ingestion import shadow_write as shadow_write_module
+from services.ingestion.handlers.discord import handle_discord_message
 from services.integrations.discord.gateway.dispatch import (
     DispatchDeps,
+    _maybe_shadow_write_gateway,
     handle_message_create,
 )
 from services.integrations.discord.gateway.tests.conftest import (
@@ -210,3 +215,100 @@ async def test_gateway_with_no_shadow_deps_wired_is_no_op(
         f"discord:msg_no_shadow_001",
     )
     assert row is not None
+
+
+# ---------------------------------------------------------------------
+# 5. Re-serialisation round-trip property.
+#
+# The Gateway is a parsed-dict surface — frames arrive as Python dicts
+# after the WSS client decodes the JSON envelope. _maybe_shadow_write_
+# gateway re-serialises the dict to canonical bytes via
+# `orjson.dumps(..., option=OPT_SORT_KEYS)` and writes THOSE bytes to
+# S3.
+#
+# N2 (replay-from-raw, per HLD §"Migration Path") and content_hash
+# dedup both depend on a property the LLD does not currently state:
+# the canonical bytes the shadow path writes can be replayed through
+# the existing Discord message handler and yield an ObservationDraft
+# byte-identical to the live in-memory dispatch.
+#
+# If this property breaks (e.g., orjson silently drops a field, or
+# coerces a snowflake string to an int, or alters number escaping),
+# the M6 replay path would write divergent observations on replay.
+# This test pins the property so a future orjson bump or canonical-
+# form change cannot regress it silently. See pyproject.toml note
+# alongside the orjson minor pin.
+# ---------------------------------------------------------------------
+
+async def test_gateway_shadow_body_round_trips_through_handler():
+    """Production code path: invoke `_maybe_shadow_write_gateway`,
+    capture the bytes the S3 mock received, replay them through
+    `handle_discord_message`, and assert the resulting
+    `ObservationDraft` is equal to the live dispatch's draft.
+
+    No DB / fresh_db dependency — this is a pure handler-replay
+    property and exercises no observations table.
+    """
+    msg = make_message_create(
+        message_id="msg_replay_001",
+        content="hello replay 🚀",
+        mentions=[{"id": "user_mention_001", "username": "alice"}],
+        attachments=[{"id": "att_001", "filename": "doc.pdf"}],
+    )
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    s3 = MagicMock()
+    s3.put_if_absent = AsyncMock(return_value=None)
+    kafka = MagicMock()
+    kafka.produce = AsyncMock(return_value=None)
+    kafka.flush = AsyncMock(return_value=0)
+    flags = MagicMock()
+    flags.get_bool = AsyncMock(return_value=True)
+
+    deps = DispatchDeps(
+        pool=MagicMock(),  # shadow path does NOT touch the pool
+        tenant_resolver=MagicMock(),
+        actor_repo=None,
+        alias_repo=None,
+        embedder=None,
+        application_id=None,
+        s3_raw_client=s3,
+        kafka_producer=kafka,
+        tenant_flags=flags,
+    )
+
+    shadow_write_module.reset_metrics()
+    await _maybe_shadow_write_gateway(
+        deps,
+        tenant_id=tenant_id,
+        message=msg,
+        guild_id=msg["guild_id"],
+    )
+
+    # The shadow body is positional arg 1 of put_if_absent(key, body).
+    args, _ = s3.put_if_absent.await_args
+    shadow_body: bytes = args[1]
+    assert isinstance(shadow_body, bytes)
+
+    # Replay: parse the canonical bytes and feed the dict back through
+    # the registered Discord MESSAGE_CREATE handler.
+    replayed_msg = json.loads(shadow_body)
+    live_draft = await handle_discord_message(msg, {})
+    replayed_draft = await handle_discord_message(replayed_msg, {})
+
+    # Equality of ObservationDraft (dataclass) covers every field a
+    # downstream observation row would carry: source_channel,
+    # content_text, content (incl. metadata + short_guild_hash),
+    # occurred_at, trust_tier, kind, source_actor_ref, external_id,
+    # entities_hint, raw_payload. If orjson or the canonical form ever
+    # mutates a value type (str→int, list→tuple, etc.), this assertion
+    # fires before the regression reaches production replay.
+    assert live_draft == replayed_draft, (
+        "canonical-JSON re-serialisation must round-trip losslessly "
+        "through the Discord message handler — otherwise M6's "
+        "replay-from-raw guarantee is broken"
+    )
+    # Belt-and-braces: the external_id (dedup key) must match exactly.
+    assert live_draft.external_id == replayed_draft.external_id == (
+        "discord:msg_replay_001"
+    )

@@ -33,7 +33,13 @@ dependencies = [
     "confluent-kafka>=2.3",                     # idempotent producer
     "aiokafka>=0.10",                           # consumer
     "aioboto3>=12.0",                           # S3 / R2 client
-    "orjson>=3.9",                              # normalizer hot path
+    # M2.2: pinned minor — canonical JSON via OPT_SORT_KEYS is the
+    # raw-body bytes for the Discord Gateway shadow path. content_hash
+    # dedup + N2 replay-from-raw both require byte-equal serialization
+    # across deployments. Patch updates are allowed; major/minor bumps
+    # require re-verifying the round-trip test in
+    # services/integrations/discord/gateway/tests/test_dispatch_shadow.py.
+    "orjson>=3.11,<3.12",                       # normalizer hot path + Gateway shadow canonical bytes
     "opentelemetry-api>=1.20",                  # tracing
     "opentelemetry-sdk>=1.20",
     "opentelemetry-instrumentation-asyncpg>=0.40b0",

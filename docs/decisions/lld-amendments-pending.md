@@ -134,7 +134,76 @@ test (M2.4) asserts against."
 
 ---
 
+## 4. Parsed-dict surface → raw bytes contract (M2.2, Discord Gateway)
+
+**Current spec state:** the LLD/HLD describes the shadow path in terms
+of "raw body bytes" as if every surface has a wire-level byte stream
+available. That is true for HTTP webhook surfaces (`services/webhooks/`)
+and the Gmail Pub/Sub push endpoint (raw `request.body()` captured
+before JSON parsing). It is NOT true for the Discord Gateway: the WSS
+client decodes the JSON frame into a Python dict before the dispatch
+layer ever sees it. M2.2 had to choose how to derive the shadow body
+for parsed-dict surfaces; the spec doesn't say.
+
+**Decision (M2.2):**
+
+1. **Canonical re-serialisation via orjson.** The Gateway shadow path
+   computes `raw_body = orjson.dumps(message, option=OPT_SORT_KEYS)`.
+   Sorted keys + orjson's deterministic number/escape formatting give
+   byte-equal output for byte-equal logical content, which is what the
+   `content_hash` dedup property requires. Discord retransmissions of
+   the same message_id arrive byte-identical at the WSS layer, so the
+   canonical form also matches across retransmissions.
+   See [services/integrations/discord/gateway/dispatch.py:184-244](services/integrations/discord/gateway/dispatch.py#L184-L244).
+
+2. **orjson minor pin.** Because canonical bytes are now part of the
+   shadow-path contract (content_hash + N2 replay-from-raw), orjson
+   is pinned to `>=3.11,<3.12` in
+   [pyproject.toml](pyproject.toml). Patch updates are allowed
+   (bug fixes only); minor/major bumps must re-run the round-trip
+   test below before being accepted. The previous bound (`>=3.9`)
+   was a lower-bound-only spec — too loose for replay determinism.
+
+3. **Round-trip property test.** A new test in
+   [services/integrations/discord/gateway/tests/test_dispatch_shadow.py](services/integrations/discord/gateway/tests/test_dispatch_shadow.py)
+   (`test_gateway_shadow_body_round_trips_through_handler`) invokes
+   the production `_maybe_shadow_write_gateway` helper on a fixture
+   MESSAGE_CREATE, captures the bytes that landed in S3, replays them
+   through `handle_discord_message` from
+   `services/ingestion/handlers/discord.py`, and asserts the resulting
+   `ObservationDraft` equals the live dispatch's draft. This pins the
+   "canonical bytes round-trip through Fyralis's own normalization
+   plane" property against future orjson bumps, canonical-form
+   refactors, or handler regressions.
+
+**Proposed amendment to LLD §5 (Raw Tier) — new sub-section "Parsed-dict surfaces":**
+
+> Surfaces whose transport delivers parsed structures (Discord Gateway
+> WSS, future SDK clients) MUST derive the raw body via canonical
+> JSON re-serialisation:
+>
+> ```python
+> raw_body = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
+> ```
+>
+> Sorted-keys + orjson's deterministic formatting are the contract
+> between the shadow writer and the M6 replay path. orjson MUST be
+> minor-pinned in `pyproject.toml`. A round-trip test (parsed-dict →
+> canonical bytes → handler → ObservationDraft equal to live) MUST
+> exist for each parsed-dict surface.
+
+**Why this matters operationally:** without the canonical form
+contract, an orjson minor bump that changes float-formatting or key-
+escape behaviour would silently break `content_hash` dedup at the S3
+layer (two byte-equal frames would hash differently) and produce
+divergent observations on replay (M6 replay-from-raw would write a
+different `ObservationDraft` than the original live dispatch).
+Locking the form + a property test makes the contract enforced, not
+implicit.
+
+---
+
 ## Tracking
 
-When the next coherence audit runs, apply all three amendments and
+When the next coherence audit runs, apply all four amendments and
 remove this file. No other items pending as of 2026-05-17.
