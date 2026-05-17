@@ -856,7 +856,7 @@ CONCURRENCY_CAP: dict[str, int] = {
 
 - `parent_close_policy=TERMINATE` on `ShardFetchWorkflow` children (within the source workflow) means a failed source workflow cancels its in-flight shards. Conversely, `parent_close_policy=ABANDON` on `SourceOnboardingWorkflow` (within the tenant workflow) means the tenant workflow can exit without killing source backfills. These are deliberate: source backfills are long; the tenant trigger workflow is short.
 - The `Semaphore` is per-workflow-execution. Cross-tenant fairness on the task queue is FIFO (Phase 2.1 verification Q B1). The semaphore only prevents one tenant from burst-scheduling. Premium-tier per-tenant task queues (HLD opt-in path) are the answer if FIFO becomes unfair in practice.
-- `check_feels_onboarded` polls every 30s. This is cheap (one count query per source) and avoids requiring shard-completion-driven signaling. The condition is content-based (Phase 2.1 Q C3): "last 7 days of observations queryable, gap below threshold."
+- Feels-onboarded signal: NOT polled in this workflow. See §2.6 for the externalised `FeelsOnboardedMonitorWorkflow` on a Temporal Schedule. Source workflow holds no polling state.
 
 ### 2.5 `ShardFetchWorkflow`
 
