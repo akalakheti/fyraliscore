@@ -14,16 +14,6 @@
 import type { Plugin } from "vite";
 import { HOME_FIXTURE, mockAsk } from "./src/api/mock-data";
 import { TODAY_FIXTURE, mockTriage } from "./src/api/today-mock";
-import {
-  ARCS_NARRATIVE_STATEMENT,
-  CHRONICLE_PERIOD_STATEMENT,
-  PREDICTIONS_NARRATIVE_STATEMENT,
-  SAMPLE_ARCS,
-  SAMPLE_CALIBRATION,
-  SAMPLE_EVENTS,
-  SAMPLE_LAYER_COUNTS,
-  SAMPLE_PREDICTIONS,
-} from "./src/components/history/sample-data";
 import type {
   TriageAction,
   TriageResponse,
@@ -227,10 +217,191 @@ export function mockBackend(): Plugin {
         const url = req.url ?? "";
         const method = req.method ?? "GET";
 
+        // ---- Wave 2: Decision Deltas (Today v2) ------------------
+        if (method === "GET" && /^\/api\/v1\/decision_deltas\/?(\?|$)/.test(url)) {
+          const { mockListDeltas } = await import("./src/api/decision-deltas-mock");
+          const params = new URLSearchParams(url.split("?")[1] ?? "");
+          json(res, mockListDeltas({
+            status: (params.get("status") ?? undefined) as any,
+            category: params.get("category") ?? undefined,
+            limit: params.get("limit") ? Number(params.get("limit")) : undefined,
+          }));
+          return;
+        }
+        const ddDetailMatch = url.match(/^\/api\/v1\/decision_deltas\/([^/?]+)(?:\?.*)?$/);
+        if (method === "GET" && ddDetailMatch && !["accept","delegate","contest","add_context","from_recommendation"].includes(ddDetailMatch[1])) {
+          const { mockGetDelta } = await import("./src/api/decision-deltas-mock");
+          json(res, mockGetDelta(ddDetailMatch[1]));
+          return;
+        }
+        const ddActMatch = url.match(/^\/api\/v1\/decision_deltas\/([^/]+)\/(accept|delegate|contest|add_context)(?:\?.*)?$/);
+        if (method === "POST" && ddActMatch) {
+          const { mockAcceptDelta, mockDelegateDelta, mockContestDelta, mockAddContext } = await import("./src/api/decision-deltas-mock");
+          const id = ddActMatch[1];
+          const body = await readJson(req);
+          const action = ddActMatch[2];
+          if (action === "accept") json(res, mockAcceptDelta(id));
+          else if (action === "delegate") json(res, mockDelegateDelta(id, body));
+          else if (action === "contest") json(res, mockContestDelta(id, body));
+          else json(res, mockAddContext(id, body));
+          return;
+        }
+
+        // ---- Wave 2: Forecasts ------------------------------------
+        if (method === "GET" && url.startsWith("/api/v1/forecasts/summary")) {
+          const { FORECASTS_SUMMARY_FIXTURE } = await import("./src/api/forecasts-mock");
+          json(res, FORECASTS_SUMMARY_FIXTURE);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/api/v1/forecasts/accuracy")) {
+          const { FORECASTS_ACCURACY_FIXTURE } = await import("./src/api/forecasts-mock");
+          json(res, FORECASTS_ACCURACY_FIXTURE);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/api/v1/forecasts/risk_exposure")) {
+          const { FORECASTS_RISK_EXPOSURE_FIXTURE } = await import("./src/api/forecasts-mock");
+          json(res, FORECASTS_RISK_EXPOSURE_FIXTURE);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/api/v1/forecasts/upcoming")) {
+          const { FORECASTS_UPCOMING_FIXTURE } = await import("./src/api/forecasts-mock");
+          json(res, FORECASTS_UPCOMING_FIXTURE);
+          return;
+        }
+        if (method === "POST" && /^\/api\/v1\/forecasts\/?(\?|$)/.test(url)) {
+          const { mockCreatedPrediction } = await import("./src/api/forecasts-mock");
+          const body = await readJson(req);
+          json(res, mockCreatedPrediction(body), 201);
+          return;
+        }
+        const fcDetailMatch = url.match(/^\/api\/v1\/forecasts\/([^/?]+)(?:\?.*)?$/);
+        if (method === "GET" && fcDetailMatch) {
+          const { detailForId } = await import("./src/api/forecasts-mock");
+          json(res, detailForId(fcDetailMatch[1]));
+          return;
+        }
+        if (method === "GET" && url.startsWith("/api/v1/forecasts")) {
+          const { FORECASTS_LIST_FIXTURE, FORECASTS_RESOLVED_FIXTURE } = await import("./src/api/forecasts-mock");
+          const isResolved = url.includes("status=resolved");
+          json(res, isResolved ? FORECASTS_RESOLVED_FIXTURE : FORECASTS_LIST_FIXTURE);
+          return;
+        }
+
+        // ---- Wave 2: Model trace ----------------------------------
+        const modelTraceMatch = url.match(/^\/api\/v1\/model\/([^/]+)\/trace(?:\?.*)?$/);
+        if (method === "GET" && modelTraceMatch) {
+          const { mockTrace } = await import("./src/api/model-trace-mock");
+          const direction = (new URLSearchParams(url.split("?")[1] ?? "").get("direction") ?? "back") as "back" | "forward";
+          json(res, mockTrace(modelTraceMatch[1], direction));
+          return;
+        }
+        const modelSupportsMatch = url.match(/^\/api\/v1\/model\/([^/]+)\/supports(?:\?.*)?$/);
+        if (method === "GET" && modelSupportsMatch) {
+          const { mockSupports } = await import("./src/api/model-trace-mock");
+          json(res, mockSupports(modelSupportsMatch[1]));
+          return;
+        }
+        const modelDependsMatch = url.match(/^\/api\/v1\/model\/([^/]+)\/depends_on(?:\?.*)?$/);
+        if (method === "GET" && modelDependsMatch) {
+          const { mockDependsOn } = await import("./src/api/model-trace-mock");
+          json(res, mockDependsOn(modelDependsMatch[1]));
+          return;
+        }
+
+        // ---- Wave 2: Ledger surface -------------------------------
+        if (method === "GET" && url.startsWith("/api/v1/history/summary")) {
+          const { LEDGER_SUMMARY_FIXTURE } = await import("./src/api/ledger-mock");
+          json(res, LEDGER_SUMMARY_FIXTURE);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/api/v1/history") && new URLSearchParams(url.split("?")[1] ?? "").get("surface") === "ledger") {
+          const { LEDGER_EVENTS_FIXTURE, filterLedgerEvents } = await import("./src/api/ledger-mock");
+          const params = new URLSearchParams(url.split("?")[1] ?? "");
+          const typesParam = params.get("types");
+          const types = typesParam ? (typesParam.split(",") as any) : undefined;
+          const events = filterLedgerEvents(LEDGER_EVENTS_FIXTURE, types);
+          json(res, { events, period: params.get("period") ?? "30d", types });
+          return;
+        }
+
         // ---- Fyralis Today surface ------------------------------
         if (method === "GET" && url.startsWith("/api/v1/today")) {
           const decorated = decorateCardsForRevision(TODAY_FIXTURE);
           json(res, { ...decorated, brand: { ...TODAY_FIXTURE.brand, name: brandName, mark: brandMark } });
+          return;
+        }
+
+        // ---- Today page v2 (briefing + focused review) -----------
+        if (method === "GET" && /^\/api\/today\/?(\?|$)/.test(url)) {
+          const { mockGetTodayPage } = await import("./src/api/today-page-mock");
+          json(res, mockGetTodayPage());
+          return;
+        }
+        const todayDeltaApplyMatch = url.match(
+          /^\/api\/today\/deltas\/([^/]+)\/apply(?:\?.*)?$/,
+        );
+        if (method === "POST" && todayDeltaApplyMatch) {
+          const { mockApply } = await import("./src/api/today-page-mock");
+          const result = mockApply(todayDeltaApplyMatch[1]);
+          if (result === null) {
+            json(res, { error: "not_found" }, 404);
+            return;
+          }
+          json(res, result);
+          return;
+        }
+        const todayDeltaDelegateMatch = url.match(
+          /^\/api\/today\/deltas\/([^/]+)\/delegate(?:\?.*)?$/,
+        );
+        if (method === "POST" && todayDeltaDelegateMatch) {
+          const { mockDelegate } = await import("./src/api/today-page-mock");
+          const body = (await readJson(req)) as Parameters<typeof mockDelegate>[1];
+          const result = mockDelegate(todayDeltaDelegateMatch[1], body);
+          if (result === null) {
+            json(res, { error: "not_found" }, 404);
+            return;
+          }
+          json(res, result);
+          return;
+        }
+        const todayDeltaCorrectionMatch = url.match(
+          /^\/api\/today\/deltas\/([^/]+)\/correction(?:\?.*)?$/,
+        );
+        if (method === "POST" && todayDeltaCorrectionMatch) {
+          const { mockCorrection } = await import("./src/api/today-page-mock");
+          const body = (await readJson(req)) as Parameters<typeof mockCorrection>[1];
+          const result = mockCorrection(todayDeltaCorrectionMatch[1], body);
+          if (result === null) {
+            json(res, { error: "not_found" }, 404);
+            return;
+          }
+          json(res, result);
+          return;
+        }
+        const todayDeltaEvidenceMatch = url.match(
+          /^\/api\/today\/deltas\/([^/]+)\/evidence(?:\?.*)?$/,
+        );
+        if (method === "GET" && todayDeltaEvidenceMatch) {
+          const { mockGetEvidence } = await import("./src/api/today-page-mock");
+          const result = mockGetEvidence(todayDeltaEvidenceMatch[1]);
+          if (result === null) {
+            json(res, { error: "not_found" }, 404);
+            return;
+          }
+          json(res, result);
+          return;
+        }
+        const todayDeltaDetailMatch = url.match(
+          /^\/api\/today\/deltas\/([^/?]+)(?:\?.*)?$/,
+        );
+        if (method === "GET" && todayDeltaDetailMatch) {
+          const { mockGetDelta } = await import("./src/api/today-page-mock");
+          const result = mockGetDelta(todayDeltaDetailMatch[1]);
+          if (result === null) {
+            json(res, { error: "not_found" }, 404);
+            return;
+          }
+          json(res, result);
           return;
         }
 
@@ -275,19 +446,25 @@ export function mockBackend(): Plugin {
           return;
         }
 
-        // ---- History page surface --------------------------------
-        if (method === "GET" && url.startsWith("/api/v1/history")) {
-          json(res, {
-            events: SAMPLE_EVENTS,
-            predictions: SAMPLE_PREDICTIONS,
-            arcs: SAMPLE_ARCS,
-            calibration: SAMPLE_CALIBRATION,
-            layer_counts: SAMPLE_LAYER_COUNTS,
-            chronicle_statement: CHRONICLE_PERIOD_STATEMENT,
-            predictions_statement: PREDICTIONS_NARRATIVE_STATEMENT,
-            arcs_statement: ARCS_NARRATIVE_STATEMENT,
-            period: new URLSearchParams(url.split("?")[1] ?? "").get("period") ?? "90d",
-          });
+        // ---- Map view (CEO belief territory) -------------------
+        if (method === "GET" && url.startsWith("/api/map/snapshot")) {
+          const { MAP_SNAPSHOT_V2_FIXTURE } = await import("./src/api/map-mock-v2");
+          json(res, MAP_SNAPSHOT_V2_FIXTURE);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/api/map/topology_events")) {
+          const { TOPOLOGY_EVENTS_FIXTURE } = await import("./src/api/map-mock");
+          json(res, TOPOLOGY_EVENTS_FIXTURE);
+          return;
+        }
+        const mapStoryMatch = url.match(/^\/api\/map\/models\/([^/?]+)/);
+        if (method === "GET" && mapStoryMatch) {
+          const { MODEL_STORY_FIXTURES, defaultStoryFor } = await import(
+            "./src/api/map-mock"
+          );
+          const id = decodeURIComponent(mapStoryMatch[1]);
+          const story = MODEL_STORY_FIXTURES[id] ?? defaultStoryFor(id);
+          json(res, story);
           return;
         }
 

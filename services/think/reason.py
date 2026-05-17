@@ -16,7 +16,7 @@ path categorizes).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -26,20 +26,26 @@ import structlog
 from lib.llm.provider import LLMProvider, LLMUsageAggregator
 from lib.shared.errors import (
     CompanyOSError,
+    InvariantViolation,
+    TrustTierError,
     ValidationError,
 )
 from lib.shared.ids import uuid7
 
 from services.retrieval.assembler import (
     AccessContext,
+    ContextBundle,
     assemble_context,
 )
 from services.retrieval.primary import (
+    RetrievalResult,
     TriggerContext,
     primary_retrieve,
 )
+from services.retrieval.second_pass import second_pass_expand
 
 from .anomaly_integration import (
+    Anomaly,
     check_anomalies,
     publish_anomalies,
 )
@@ -47,7 +53,8 @@ from .applier import AlreadyAppliedError, apply_diff
 from .cascade import CascadeEvent, CascadeResult, cascade
 from .debug_capture import capture as debug_capture
 from .deterministic import deterministic_handler, is_authoritative
-from .llm_reason import llm_reason
+from .diff_schema import RawDiff, ValidatedDiff
+from .llm_reason import ReasoningFailure, llm_reason
 from .observability import (
     METRICS,
     ThinkRunRecord,
@@ -66,6 +73,7 @@ from .region_locks import (
 )
 from .validator import (
     OutOfRegionError,
+    ValidationFailure,
     validate,
 )
 
@@ -665,6 +673,7 @@ async def _run_once(
             validated, conn,
             trigger_kind=trigger_kind_full,
             trigger_cause_event_id=trigger.observation_id,
+            think_run_id=record.id,
         )
     except AlreadyAppliedError as e:
         await update_think_run(

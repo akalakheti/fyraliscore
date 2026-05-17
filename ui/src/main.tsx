@@ -1,10 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import DemoLanding from "./pages/DemoLanding";
-import Structure from "./pages/Structure";
-import History from "./pages/History";
-import MyMind from "./pages/MyMind";
+
+import TodayBriefing from "./pages/today-v2/Briefing";
+import TodayFocusedReview from "./pages/today-v2/FocusedReview";
+import ModelPageV2 from "./pages/model-v2/ModelPage";
+import ForecastsSpec from "./pages/forecasts/ForecastsSpec";
+import LedgerSpec from "./pages/ledger/LedgerSpec";
+import { AutoDemoSession } from "./shell/AutoDemoSession";
 import { DebugLayout } from "./debug/DebugLayout";
 import { SignalsList } from "./debug/pages/SignalsList";
 import { SignalDetailPage } from "./debug/pages/SignalDetail";
@@ -13,9 +16,11 @@ import { ModelsList, ModelDetail } from "./debug/pages/Models";
 import { Acts } from "./debug/pages/Acts";
 import { Renders } from "./debug/pages/Renders";
 import { Cache } from "./debug/pages/Cache";
-import "./index.css";
 
-// Router: CEO view at /, inspector at /debug/*.
+import "./index.css";
+import "./styles/spec.css";
+import "./pages/model-v2/styles.css";
+
 const root = document.getElementById("root");
 if (!root) throw new Error("root element missing");
 
@@ -23,11 +28,66 @@ ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<DemoLanding />} />
-        <Route path="/demo" element={<Navigate to="/" replace />} />
-        <Route path="/structure" element={<Structure />} />
-        <Route path="/history" element={<History />} />
-        <Route path="/mind" element={<MyMind />} />
+        <Route path="/" element={<Navigate to="/today" replace />} />
+        <Route
+          path="/today"
+          element={
+            <AutoDemoSession>
+              <TodayBriefing />
+            </AutoDemoSession>
+          }
+        />
+        <Route
+          path="/today/review/:deltaId"
+          element={
+            <AutoDemoSession>
+              <TodayFocusedReview />
+            </AutoDemoSession>
+          }
+        />
+        <Route
+          path="/model"
+          element={
+            <AutoDemoSession>
+              <ModelPageV2 />
+            </AutoDemoSession>
+          }
+        />
+        <Route
+          path="/forecasts"
+          element={
+            <AutoDemoSession>
+              <ForecastsSpec />
+            </AutoDemoSession>
+          }
+        />
+        <Route
+          path="/ledger"
+          element={
+            <AutoDemoSession>
+              <LedgerSpec />
+            </AutoDemoSession>
+          }
+        />
+
+        {/* Spec navigation aliases */}
+        <Route path="/sources" element={<Navigate to="/model" replace />} />
+        <Route path="/settings" element={<Navigate to="/today" replace />} />
+
+        {/* Legacy redirects */}
+        <Route path="/structure" element={<Navigate to="/model" replace />} />
+        <Route path="/map" element={<Navigate to="/model" replace />} />
+        <Route path="/history" element={<Navigate to="/ledger" replace />} />
+        <Route path="/mind" element={<Navigate to="/today" replace />} />
+        <Route path="/demo" element={<Navigate to="/today" replace />} />
+        <Route path="/commitments" element={<Navigate to="/model" replace />} />
+        <Route path="/customers" element={<Navigate to="/model" replace />} />
+        <Route path="/risks" element={<Navigate to="/model" replace />} />
+        <Route path="/decisions" element={<Navigate to="/model" replace />} />
+        <Route path="/owners" element={<Navigate to="/model" replace />} />
+        <Route path="/teams" element={<Navigate to="/model" replace />} />
+        <Route path="/ask" element={<Navigate to="/today" replace />} />
+
         <Route path="/debug" element={<DebugLayout />}>
           <Route index element={<Navigate to="signals" replace />} />
           <Route path="signals" element={<SignalsList />} />

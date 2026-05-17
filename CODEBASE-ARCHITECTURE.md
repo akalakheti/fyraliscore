@@ -2,17 +2,19 @@
 
 ## Executive Summary
 
-**Company OS** is an organizational intelligence runtime designed to surface real-time insights to a founder/CEO by combining continuous signal ingestion, probabilistic reasoning (Models), executable commitments (Acts), and resource tracking (Resources). The system is single-tenant in the dogfood phase but architecturally multi-tenant ready. It consists of:
+**Company OS** is an organizational intelligence runtime designed to surface real-time insights to a founder/CEO by combining continuous signal ingestion, probabilistic reasoning (Models), executable commitments (Acts), and resource tracking (Resources). The system is multi-tenant capable and is currently deployed in two modes: a single-tenant dogfood and a public multi-tenant **demo** environment (`demo.fyralis.xyz`) running under Docker Compose with Nginx + Let's Encrypt. It consists of:
 
-- A **Python FastAPI gateway** (`services/gateway/main.py:8000`) that coordinates all backend services
-- A **React/Vite UI** (`ui/src/App.tsx`) running on port 5173
+- A **Python FastAPI gateway** ([services/gateway/main.py](services/gateway/main.py), port 8000) that coordinates all backend services
+- A **React/Vite UI** ([ui/src/App.tsx](ui/src/App.tsx)) running on port 5173, organized as a multi-surface cockpit (`/` Today, `/structure`, `/history`, `/mind`, `/demo`)
 - A **PostgreSQL 16** database with pgvector (vector search)
 - **Ollama** for local embeddings (`nomic-embed-text:v1.5`)
-- **DeepSeek LLM** for reasoning (Think) and rendering (Greeting/Query)
-- A **simulation harness** for authoring test scenarios
+- A **multi-provider LLM stack** (default **Anthropic `claude-opus-4-7`**, plus OpenAI and DeepSeek) for Think reasoning and Rendering
+- A **simulation harness** for authoring test scenarios, plus an in-UI **Signal Simulator** for multi-channel injection
+- A **demo company** subsystem (Pelago, Truss, Northwind, Meridian) with per-tenant model routing, budget caps, and live signal-injection sessions
 - An **LSOB benchmark suite** (Longitudinal Synthetic-Organization Benchmark) for evaluating reasoning quality
+- A **V1 substrate** track (audit chain, reconciliation, region locks, falsifier predicates) tracked in [services/think/SUBSTRATE_SEMANTICS.md](services/think/SUBSTRATE_SEMANTICS.md)
 
-The core workflow is: **Ingest signal → Create Observation → Trigger Think → Generate Models/Acts → Cache & Render → Display to CEO**
+The core workflow is: **Ingest signal → Create Observation → Trigger Think → Generate Models / Acts / Recommendations → Cache & Render → Display to CEO across Today / History / Structure surfaces**
 
 ---
 
@@ -51,18 +53,23 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       UI (React/Vite, :5173)                        │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │ CEO View: Greeting | Query Grid | Cards | Close Line | Ask   │  │
-│  │ Subscribes to: /view/ceo/stream (WebSocket heartbeat)        │  │
+│  │ Multi-surface cockpit (react-router):                        │  │
+│  │   /          Today  — recommendations, cards, ground input   │  │
+│  │   /structure        — relationship graph, resources, commits │  │
+│  │   /history          — chronicle, arcs, predictions           │  │
+│  │   /mind             — loops, notes, reminders                │  │
+│  │   /demo             — DemoPicker → DemoLanding (VC pitch)    │  │
+│  │ Streams: WS /view/ceo/stream + SSE /v1/recommendations/stream│  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
-                            ↕ HTTP/WS
+                            ↕ HTTP / WS / SSE
 ┌─────────────────────────────────────────────────────────────────────┐
 │                 Gateway (FastAPI, :8000)                            │
-│  ┌─────────────┬──────────────┬──────────────┬──────────────┐      │
-│  │ /ingest/*   │ /view/ceo/*  │ /rendering/* │ /simulation/ │      │
-│  │ (Ingestion  │ (CEO view    │ (Internal    │ (Dev UI)     │      │
-│  │  handlers)  │  endpoints)  │  RND calls)  │              │      │
-│  └─────────────┴──────────────┴──────────────┴──────────────┘      │
+│  ┌──────────────┬──────────────┬──────────────┬──────────────┐     │
+│  │ /ingest/*    │ /view/ceo/*  │ /rendering/* │ /simulation/ │     │
+│  │ /v1/today    │ /v1/history  │ /v1/structure│ /v1/demo/*   │     │
+│  │ /v1/recommendations/*  /v1/cards/{id}/conversation         │     │
+│  └──────────────┴──────────────┴──────────────┴──────────────┘     │
 │                            ↓                                        │
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │ Service Layer (in-process)                                  │  │
@@ -70,8 +77,13 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
 │  │  • Greeting (cache, scheduler, snapshot, rendering_adapter) │  │
 │  │  • Query (ask/answer, prefetch, strategies)                 │  │
 │  │  • Rendering (voice rules, prompts)                         │  │
-│  │  • Think (reason, applier, validator)                       │  │
-│  │  • Retrieval (primary, second-pass, maintenance)            │  │
+│  │  • Think (reason, applier, validator, audit, reconciler,    │  │
+│  │           cascade, region_locks)                            │  │
+│  │  • Retrieval (primary, second-pass, maintenance, pathways)  │  │
+│  │  • Recommendations (handlers, watchers, repo)               │  │
+│  │  • Conversations (per-card probe / dialogue)                │  │
+│  │  • Today / History (UI aggregators)                         │  │
+│  │  • Demo (sessions, budget, model routing, simulator, sse)   │  │
 │  │  • Models, Observations, Acts, Resources repos              │  │
 │  │  • Entity aliases, Actors                                   │  │
 │  └─────────────────────────────────────────────────────────────┘  │
@@ -79,14 +91,15 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
 └─────────────────────────────────────────────────────────────────────┘
                             ↕
 ┌──────────────────────────────────────────────────────────────────────┐
-│           PostgreSQL 16 (Postgres.local:5432)                        │
+│           PostgreSQL 16 (pgvector/pg16)                              │
 │  ┌──────────────┬──────────────┬──────────────┬──────────────┐      │
 │  │ Observations │ Models       │ Acts         │ Resources    │      │
 │  │ (partitioned │ (indexed)    │ (Goals,      │ (tracked)    │      │
 │  │  by time)    │              │  Commits,    │              │      │
 │  │              │              │  Decisions)  │              │      │
-│  │ + Actors     │ + Proposals  │ + Triggers   │ + Xacts      │      │
-│  │ + Cache      │ + Readings   │ + Queue      │              │      │
+│  │ + Actors     │ + Audit chain│ + Triggers   │ + Xacts      │      │
+│  │ + Cache      │ + Watchers   │ + Queue      │              │      │
+│  │ + Recs       │ + Reconcile  │ + Artifacts  │ + Demo cfg   │      │
 │  └──────────────┴──────────────┴──────────────┴──────────────┘      │
 │  + pgvector (HNSW) for semantic search                              │
 │  + PARTITION BY occurred_at (quarterly)                             │
@@ -99,19 +112,41 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
         └─────────────────────────────────────┘
                             ↕
         ┌─────────────────────────────────────┐
-        │ DeepSeek LLM API                    │
-        │ deepseek-reasoner (Think)           │
-        │ deepseek-chat (Rendering)           │
+        │ LLM Providers (pluggable)           │
+        │ • Anthropic claude-opus-4-7 (default)│
+        │ • OpenAI gpt-4o                      │
+        │ • DeepSeek (reasoner / chat)         │
+        │ Per-tenant routing in demo mode      │
         └─────────────────────────────────────┘
 
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Background Workers (separate processes, polling Postgres)           │
-│  • Think Worker: drains think_trigger_queue (T1/T2/T3/T4 triggers)│
+│  • Think Worker: drains think_trigger_queue (T1-T4 + T6 triggers)  │
 │  • Post-Commit Worker: persists model state changes                 │
 │  • Greeting Scheduler: refreshes CEO view cache every 15 min       │
+│  • Recommendation watchers: falsifier predicate firing              │
+│  • Edge Drift Detector (S1): samples Models per tenant every       │
+│    30 min, verifies legacy arrays match typed model_edges; logs    │
+│    a metric per drifted kind so dual-write violations are visible  │
+│  • Topology Updater (S2): drains topo_dirty_queue every 60s;        │
+│    recomputes Model topo_embedding via the alpha-anchored rule;     │
+│    propagates significant deltas to neighbors with damping (γ=0.5)  │
+│  • Neighborhood Detector (S2/S3): hourly; runs connected-components │
+│    on the active edge graph per tenant, matches communities to      │
+│    prior neighborhoods for stable IDs, refreshes membership table.  │
+│    S3: detects emergence/dissolution/split/merge/drift phase events,│
+│    writes them to topology_events, enqueues a T6 trigger per event  │
 │  • (Future) Entity Resolver: resolves actor/entity refs             │
 │  • (Future) Anomaly Processor: detects outliers                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Production Deployment (demo.fyralis.xyz, AWS Lightsail)             │
+│  docker-compose.yml services:                                       │
+│   postgres (pgvector/pg16) │ ollama │ gateway │ think_worker        │
+│   post_commit_worker       │ ui (nginx) │ nginx-proxy │ acme-companion │
+│  TLS via Let's Encrypt (acme-companion); SPA cache in nginx-ui.conf │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -140,7 +175,7 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
        - **Pathway C** (temporal): find Models created in last 7 days with relevant scope
        - Merge results, rank by (pathway_weight × position_decay), return top 80 Models
    - **Reasoning** (`services/think/reason.py`):
-     - Pass observation + retrieved Models to DeepSeek-reasoner
+     - Pass observation + retrieved Models to the configured Think model (default `claude-opus-4-7`)
      - Model produces schema-validated JSON:
        ```python
        {
@@ -164,7 +199,7 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
      - Assemble `SubstrateSnapshot`: top active Models, active Commitments, resource health, recent state changes, top 3 anomalies, CEO conversation context
    - **Rendering** (RND via HTTP adapter):
      - Send `RenderGreetingRequest` to `POST /rendering/greeting`
-     - RND calls DeepSeek-chat with prose prompt: "Write a concise greeting for the CEO mentioning these situation Models..."
+     - RND calls the configured rendering model with prose prompt: "Write a concise greeting for the CEO mentioning these situation Models..."
      - Returns `RenderGreetingResponse` with `body_html`, cost attribution
    - **Cache** (`services/greeting/cache.py`):
      - Store in Postgres `view_ceo_cache` table with `cache_key='greeting'`, `cached_content={body_html, meta}`, `cached_at=now()`
@@ -206,14 +241,17 @@ Drawn from `ARCHITECTURE-FINAL.md` and `SCHEMA-LOCK.md`:
 
 | Subdirectory | Purpose | Key Files |
 |---|---|---|
-| `lib/llm` | LLM provider abstraction | `provider.py:77-150` — pluggable backend (Anthropic/OpenAI/DeepSeek); `tests/test_provider.py` |
+| `lib/llm` | LLM provider abstraction | `provider.py` — pluggable backend; **default Anthropic `claude-opus-4-7`**, plus OpenAI and DeepSeek (OpenAI-API-compatible w/ strict tool mode); per-tenant override via demo `model_routing`; cost ledger per model |
 | `lib/embeddings` | Vector embedding service | `ollama.py:1-80` — wraps Ollama HTTP; `tests/test_ollama.py` |
 | `lib/nexus` | Agent attestation stub | `client.py` — Phase 4 integration point (currently mock) |
-| `lib/shared` | Shared types, DB, errors | `types.py:1-150` — Pydantic models for all rows; `db.py` — asyncpg helpers; `errors.py` — domain exceptions; `ids.py` — UUID7 generation; `trust.py` — trust tier logic |
+| `lib/shared` | Shared types, DB, errors | `types.py:1-150` — Pydantic models for all rows; `db.py` — asyncpg helpers; `errors.py` — domain exceptions; `ids.py` — UUID7 generation; `trust.py` — trust tier logic; `edge_registry.py` — declarative per-kind semantics for the Model-to-Model `model_edges` graph (S1) |
+| `lib/topology` | Positional-embedding math (S2/S3/S4) | `embeddings.py` — `content_anchor` (768→128 random projection), `compute_topo_embedding` (alpha-anchored neighbor-mean rule), `delta_magnitude`. Tunables: `TOPO_ALPHA` (0.3), `TOPO_DELTA_EPSILON` (0.05), `TOPO_DAMPING_GAMMA` (0.5). `community.py` — connected-components detection, greedy stable-ID matching by Jaccard, density + centrality. **S3:** `naming.py` — heuristic `derive_signature(member_summaries)` produces a short human-readable label for a neighborhood (kinds + top scope entities/actors), stable for the same member set; `member_summaries_from_rows` adapts asyncpg records into the namer's input shape. **S4:** `relocate.py` — `RelocateTarget`, `parse_relocate_target` (claim_op shape validation), `blend_topo(current, target, alpha)` (L2-normalized blend), `select_bounded_neighbors` (top-K by centrality), `damped_magnitude` (γ^depth · base). All bounded-cascade tunables env-overridable via `TOPO_RELOCATE_*` |
 
 **Public API**:
 - `lib.llm.provider.build_provider(provider_name, api_key, model) → LLMProvider`
-- `lib.embeddings.ollama.OllamaClient(url).embed(text) → list[float]`
+- `lib.embeddings.factory.make_embedder()` → returns an `Embedder`
+  Protocol implementation (Ollama or OpenAI, env-driven). Direct
+  imports of `OllamaClient` are still supported for backward compat.
 - `lib.shared.types.ObservationRow, ModelRow, GoalRow, CommitmentRow, DecisionRow, ResourceRow` (Pydantic)
 - `lib.shared.db.fetch_all(pool, query, params) → list[Row]`
 - `lib.shared.ids.uuid7() → UUID` (time-ordered)
@@ -251,7 +289,8 @@ The system is organized as a single-process app with logical service boundaries.
 #### **services/models** (`/Users/rachinkalakheti/fyraliscore/services/models/`)
 - **Purpose**: Belief store — epistemic models about the organization
 - **Key Files**:
-  - `repo.py` — `ModelsRepo` class; methods: `insert(ModelCreate)`, `retrieve(ids, conn)` (activation bump), `get_by_id(id)`, `list_active_by_tenant(tenant_id)`, `update_status(..., reason)`
+  - `repo.py` — `ModelsRepo` class; methods: `insert(ModelCreate)`, `retrieve(ids, conn)` (activation bump), `get_by_id(id)`, `list_active_by_tenant(tenant_id)`, `update_status(..., reason)`. Also exports `_set_model_relations(...)` — the dual-write chokepoint that keeps `model_edges` in sync with the legacy array columns (S1).
+  - `edges_repo.py` — `EdgesRepo` for the unified Model-to-Model edge primitive (S1, migration 0030). Single writer for `model_edges`. Public methods: `link`, `unlink`, `traverse_forward`, `traverse_backward` (new bidirectional capability), `mark_inert`, `check_no_cycle`, `get_drift_sample`.
   - `propositions.py` — helpers for Model proposition schema validation
   - `calibration.py` — confidence calibration machinery
   - `decay.py` — time-based confidence decay (older Models lose confidence)
@@ -273,10 +312,24 @@ The system is organized as a single-process app with logical service boundaries.
     activation: float  # 0.0–1.0 (how recently retrieved)
     falsifier: dict | None  # condition that would flip status to 'contested_false'
     signal_readings: list[dict]  # supporting evidence
+    supporting_model_ids: list[UUID]  # legacy: ids that support this Model
+    contributing_models: list[UUID]   # legacy: ids that resolve this prediction
     status: ModelStatus  # 'active' | 'archived' | 'superseded' | 'contested_false'
     evaluate_at: datetime | None  # for predictions
   ```
 - **DB Table**: `models` (indexed on tenant_id, status, confidence, activation)
+- **Model-to-Model graph (S1, migration 0031)**: the seven pre-S1 connection mechanisms (two array columns, pattern back-link, supersession lifecycle flag, transient queue, two latent proposition-encoded edges) are unified into a single typed-edge primitive `model_edges` with a declarative registry at [lib/shared/edge_registry.py](lib/shared/edge_registry.py). Six edge_kinds in v1: `supports`, `contributes_to_resolution`, `instance_of`, `superseded_by` (enabled producers), plus `contradicts` and `weakens` (reserved names). The registry owns per-kind invariants (DAG cycle scope, weight rules, archive cascade callbacks, mutually-exclusive-with). Dual-write phase: arrays remain authoritative; the chokepoint helper `_set_model_relations` writes both sides; the [edge_drift](services/workers/edge_drift/) worker verifies parity. New capability: O(log n) reverse traversal for every kind via `model_edges_target_idx`.
+- **Topology layer (S2, migration 0032)**: every Model carries a learned **positional embedding** (`topo_embedding VECTOR(128)`) — distinct from its content embedding (768d, semantic). The position is initialized from `content_anchor()` at insert (synchronous, inside `_insert_core`) and refined continuously by the [topology_updater worker](services/workers/topology_updater/) via the alpha-anchored neighbor-mean rule (α = 0.3 default; `topo(M) = (1-α)·weighted_mean(neighbor_topos) + α·content_anchor(M)`). Edge mutations enqueue both endpoints in `topo_dirty_queue`; archives enqueue every neighbor (`mark_inert` walks the inerted edges and enqueues the other endpoints). The [neighborhood_detector worker](services/workers/neighborhood_detector/) runs hourly community detection (connected-components on the active edge graph in v1; Louvain swap-out is a single function later) and materializes neighborhoods with stable IDs across re-clusterings via greedy Jaccard matching.
+- **Topology becomes consequential (S3, migration 0033)**: arrangement now flows into reasoning end-to-end.
+  1. **Phase events** — every neighborhood recompute runs `detect_phase_events()` over prev/new community snapshots and writes a `topology_events` row per `emergence`/`dissolution`/`split`/`merge`/`drift`. Naming is heuristic (`lib/topology/naming.py:derive_signature` — top proposition_kinds + top scope entity/actor labels) and lands on both `model_neighborhoods.named_signature` (preserving any LLM-assigned name) and on the event itself.
+  2. **T6 trigger** — the neighborhood_detector enqueues a `T6` row in `think_trigger_queue` per fresh phase event in the same transaction (per-kind cap: 10 by default), giving the LLM a chance to name the cluster, surface a recommendation, or no-op. T6 is non-authoritative; it routes through `llm_reason` with weights F=0.5/A=0.3/B=0.2.
+  3. **Pathway F** — `pathway_f_topological(seed → topo_embedding HNSW + neighborhood expansion)` lives in [services/retrieval/pathways.py](services/retrieval/pathways.py) and is wired into every existing trigger as a 0.15-weight contribution (T1/T2/T3/T4) plus dominant for T6. When the bundle has Models with neighborhoods, the assembler attaches a `topology_context` summary that the prompt renders inside `<topology_context>`. Empty topology degrades gracefully — F returns `notes['reason']='empty_seed'` and other pathways carry the load.
+- **Loop closes — `relocate` claim_op + bounded cascade (S4, migration 0034)**: arrangement is now a first-class diff operation. Reasoning can deliberately reposition a Model in topology space, and that move propagates through the substrate with bounded fan-out so a single relocate doesn't tsunami-cascade.
+  1. **`relocate` claim_op** — `ClaimOp(op="relocate", model_id, relocate_target, reason)` where `relocate_target = {"kind": "model_id"|"vector"|"neighborhood_id", "value": <ref>, "alpha": <float in (0,1]>}`. `alpha=1.0` snaps to the target topo; `alpha=0.5` blends halfway. The system prompt in [services/think/prompt.py](services/think/prompt.py) instructs the LLM to use it sparingly — only when reasoning concludes a Model belongs in a different region than the edge graph has placed it.
+  2. **TopoRepo.relocate** ([services/topology/topo_repo.py](services/topology/topo_repo.py)) — resolves target into a 128-d topo vector (lookup by model_id, lookup by neighborhood centroid, or use the explicit vector), reads the Model's current topo, calls `lib.topology.relocate.blend_topo(current, target, alpha)`, writes the new topo + `topo_updated_at`, records a `topology_events` row with `kind='relocate'` (magnitude = L2 delta, payload carries audit metadata), and runs `bounded_cascade` if delta > epsilon.
+  3. **Bounded cascade** — `TopoRepo.bounded_cascade(origin_model_id, base_delta, max_depth=2, max_fanout=20, damping=0.5)` walks the active edge graph BFS from origin out to `max_depth` hops; at each hop, a single batched query reads neighbors + their centralities; `select_bounded_neighbors` picks the top-K by centrality; each is enqueued in `topo_dirty_queue` with damped magnitude (`base_delta · γ^depth`). De-duplication via the queue's UNIQUE NULLS NOT DISTINCT constraint. Differs from S2's `enqueue_neighbors` (no fan-out cap) — bounded cascade is the one safe for explicit reasoning-driven moves.
+  4. **Applier + validator** ([services/think/applier.py](services/think/applier.py), [services/think/validator.py](services/think/validator.py)) — `_apply_claim_op` adds a `relocate` branch that calls `TopoRepo.relocate`; `_validate_claim_op` adds shape validation via `parse_relocate_target` (UUID parsing, dim checks, alpha range). A relocate emits `state_changes=0` (no Model row mutation) — the `topology_events` row is the audit primary key.
+  5. **`lib/topology/relocate.py`** — pure helpers: `RelocateTarget` dataclass; `parse_relocate_target` (claim_op → typed target with validation); `blend_topo(current, target, alpha)` (L2-normalized blend); `select_bounded_neighbors(candidates, max_fanout)` (top-K by centrality); `damped_magnitude(base, hop_depth, gamma)` (geometric damping). All env-tunable: `TOPO_RELOCATE_DEFAULT_ALPHA` (1.0), `TOPO_RELOCATE_CASCADE_MAX_DEPTH` (2), `TOPO_RELOCATE_CASCADE_MAX_FANOUT` (20), `TOPO_RELOCATE_CASCADE_DAMPING` (0.5).
 
 #### **services/acts** (`/Users/rachinkalakheti/fyraliscore/services/acts/`)
 - **Purpose**: Executable declarations — Goals, Commitments, Decisions
@@ -334,12 +387,23 @@ The system is organized as a single-process app with logical service boundaries.
     recorded_at: datetime
   ```
 
-#### **services/think** (`/Users/rachinkalakheti/fyraliscore/services/think/`)
-- **Purpose**: Cognitive engine — reasons about signals to generate Models/Acts
+#### **services/topology** ([services/topology/](services/topology/)) — S2/S3
+- **Purpose**: Positional embedding layer + materialized neighborhoods + phase-event log. The substrate's emergent geometry, distinct from the relational store ([services/models/](services/models/)).
 - **Key Files**:
-  - `worker.py:1-28` — main loop; polls `think_trigger_queue` with FOR UPDATE SKIP LOCKED; spawns `think()` calls
+  - `topo_repo.py` — `TopoRepo`. Methods: `set_initial_topo(content_emb)` — synchronous content_anchor at insert; `enqueue / enqueue_neighbors / dequeue_pending / mark_processed` — `topo_dirty_queue` mechanics; `recompute_topo(model_id)` — runs the alpha-anchored update rule for one Model (reads all active neighbors via any edge_kind, weights them per `_TOPO_EDGE_WEIGHTS`, blends with `content_anchor`, writes back). Callers always pass `conn` so writes participate in their transaction.
+  - `neighborhoods_repo.py` — `NeighborhoodsRepo.recompute_for_tenant(conn, tenant_id)` — single-pass detection: load Models + edges, run `detect_communities`, prune singletons, match to existing neighborhoods for stable IDs, upsert + dissolve unmatched, refresh membership table. **S3:** also reads each Model's `proposition_kind` + `scope_actors` + `scope_entities` to build a `MemberSummary` map, computes `derive_signature()` for each new/matched neighborhood (writes `named_signature` only when previously NULL — LLM-assigned names are preserved), and at the end runs `detect_phase_events()` against the prev/new snapshot to emit emergence/dissolution/split/merge/drift rows into `topology_events`. `RecomputeReport` carries `phase_events_emitted` + `phase_event_ids`.
+  - `events_repo.py` (S3) — `TopologyEventsRepo` for `topology_events` (record / list_recent / pending / mark_processed / for_neighborhood) plus the pure detector `detect_phase_events(prev_snapshots, new_communities, label_to_neighborhood_id, matched_prev_ids, member_summaries)`. Closed-set kinds: `emergence`, `dissolution`, `split`, `merge`, `drift`. The detector classifies each prev/new pair and computes a per-kind magnitude (size for emergence/merge/dissolution, split-balance `1 - largest_share/total` for split, Jaccard distance for drift). `DRIFT_JACCARD_THRESHOLD=0.4` (env-tunable) gates drift emission.
+- **Direction convention**: edges are treated as **undirected** for topology (arrangement is symmetric — if A is positionally near B, B is near A). Edge `weight` flows into `neighbor_weights`; future `contradicts` edges contribute NEGATIVE weight to push topo embeddings apart.
+- **Hooks back into models**: ModelsRepo.`_insert_core` calls `set_initial_topo` synchronously so a fresh Model has non-NULL `topo_embedding` at commit; EdgesRepo.`link / unlink / mark_inert` enqueues both endpoints in `topo_dirty_queue` (inline helper, not via `TopoRepo.enqueue`, to avoid a circular import — same SQL).
+- **Hook into trigger queue (S3)**: the [neighborhood_detector worker](services/workers/neighborhood_detector/) enqueues a T6 row in `think_trigger_queue` per fresh phase event in the same transaction as the events; per-kind cap (`NEIGHBORHOOD_DETECTOR_T6_LIMIT_PER_KIND=10`) prevents tenant-wide recomputes from drowning the Think queue. Over-the-cap events are still recorded in `topology_events` (CEO view consumes the table, not the queue) but flagged `processed_at=now()` so they don't re-emit on the next sweep.
+
+#### **services/think** ([services/think/](services/think/))
+- **Purpose**: Cognitive engine — reasons about signals to generate Models / Acts / Recommendations; enforces V1 substrate semantics (audit chain, reconciliation, region locks)
+- **Canonical spec**: [services/think/SUBSTRATE_SEMANTICS.md](services/think/SUBSTRATE_SEMANTICS.md) (V1 baseline)
+- **Key Files**:
+  - `worker.py` — main loop; polls `think_trigger_queue` with FOR UPDATE SKIP LOCKED; spawns `think()` calls
   - `reason.py` — core reasoning logic; calls LLM with prompt template; parses response into schema
-  - `applier.py` — applies LLM output (inserts/updates Models, enqueues Acts)
+  - `applier.py` — applies LLM output (inserts/updates Models, enqueues Acts); enforces region lock and trigger-id uniqueness
   - `validator.py` — schema validation post-LLM
   - `llm_reason.py` — LLM call wrapper with retries, cost attribution
   - `prompt.py` — prompt engineering; templates for T1/T2/T3/T4
@@ -347,11 +411,21 @@ The system is organized as a single-process app with logical service boundaries.
   - `circuit_breaker.py` — fallback behavior if LLM is unavailable
   - `observability.py` — metrics (latency, cost, errors)
   - `post_commit.py` — post-commit side effects (cache invalidation, notification)
-- **Trigger Types** (`ARCHITECTURE-FINAL.md §7`):
-  - **T1** — New signal (observation): pathway mix A+B+C
-  - **T2** — Prediction resolution due: pathways A+D
-  - **T3** — Anomaly detected: pathways A+B+C
-  - **T4** — Background pattern/model-reeval: pathways D+A
+  - **V1 substrate additions**:
+    - `audit.py` — Q5 audit chain: `emit_audit_event()`, `get_audit_chain()`, `emit_reconciliation_merge_audit()`; backed by `audit_events` table
+    - `region_locks.py` — W3.Q4 advisory-lock region serialization via `pg_advisory_xact_lock`
+    - `reconciler.py` — auto-merge / human-review flow for duplicate Models; emits `reconciliation_events`
+    - `cascade.py` — cascade operations and error handling for downstream Model updates
+    - `auto_create_commitment.py` — automatic commitment creation from Think output
+    - `strict_schema.py`, `diff_schema.py` — strict JSON schema validation and diff detection
+    - `thresholds.py`, `anomaly_integration.py` — per-tenant anomaly thresholds (P90/P95/P99) feeding T3 triggers
+    - `debug_capture.py` — sidecar capture into `think_run_artifacts` (debug UI)
+- **Trigger Types** (`ARCHITECTURE-FINAL.md §7`; **S3** adds T6 + threads F into every existing trigger):
+  - **T1** — New signal (observation): pathway mix A+B+C+F (weights 0.35/0.35/0.15/0.15)
+  - **T2** — Prediction resolution due: pathways A+B+D+F (0.35/0.35/0.15/0.15)
+  - **T3** — Anomaly detected: pathways A+B+C+F (0.4/0.25/0.2/0.15)
+  - **T4** — Background pattern/model-reeval: pathways D+A+F (0.5/0.35/0.15)
+  - **T6 (S3)** — Topology phase event: pathways F+A+B (0.5/0.3/0.2). Enqueued by the [neighborhood_detector worker](services/workers/neighborhood_detector/) when a phase event is recorded in `topology_events`. Non-authoritative (LLM-driven). The trigger payload carries `topology_event_id`, `topology_event_kind` (`emergence`/`dissolution`/`split`/`merge`/`drift`), `neighborhood_id`, `predecessor_neighborhood_ids`, `sibling_neighborhood_ids`, `member_model_ids`, and a generated `seed_natural_text` so Pathway B has something to embed. The LLM may name the cluster (claim_op.update on a representative member) or surface a CEO-facing recommendation.
 - **Prompt Example** (simplified):
   ```
   You are reasoning about organizational signals for a company.
@@ -379,25 +453,35 @@ The system is organized as a single-process app with logical service boundaries.
   - `primary.py:1-30` — main orchestrator; per-trigger pathway weighting; merge + RRF ranking
   - `pathways.py` — implementations:
     - **Pathway A** (structural): actor/entity-scope overlap
-    - **Pathway B** (semantic): vector similarity search
+    - **Pathway B** (semantic): vector similarity search over `models.embedding` (768d content)
     - **Pathway C** (temporal): recent Models in time window
     - **Pathway D** (pattern): precipitation patterns + background relationships
+    - **Pathway F (S3, topological)**: HNSW cosine NN over `models.topo_embedding` (128d positional) **plus** materialized-neighborhood expansion. Where B asks "what does this signal MEAN", F asks "where does this signal LIVE in the substrate's emergent arrangement". Seed resolution priority: `precomputed_topo_vector` → `seed_model_id` (uses the model's topo + its membership) → `seed_natural_text + embedder` (Ollama embed → `content_anchor` projection). Expansion: for each Model surfaced (NN or seed), look up its active neighborhood via `model_neighborhood_membership` and pull co-members ordered by `centrality DESC`. Scored as `DIMENSION_TOPOLOGICAL` in [scoring.py](services/retrieval/scoring.py); maps to RRF dimension weight in `_merge_and_rank_models_rrf`.
   - `second_pass.py` — re-rank Models with fresh conversational context
   - `maintenance.py` — background relationship updates (links Models to related Models)
-  - `scoring.py` — RRF (Reciprocal Rank Fusion) + position decay
-  - `assembler.py` — rebuild complex objects from DB rows
-  - `config.py` — tuning knobs (top_n=80, decay_base=0.9, etc.)
-- **TriggerContext** (`primary.py:86-100`):
+  - `scoring.py` — RRF (Reciprocal Rank Fusion) + position decay. **S3:** `DIMENSION_TOPOLOGICAL` added (default weight 0.7), pathway-to-dimension map `{A,B,C,D,F}` complete.
+  - `assembler.py` — rebuild complex objects from DB rows. **S3:** `_compute_topology_context(conn, tenant_id, models, seed_model_id, seed_neighborhood_id)` reads `model_neighborhood_membership` for every bundle Model, joins to `model_neighborhoods` for `named_signature`/`density`/status, ranks neighborhoods by intersection-with-bundle DESC, and tail-fetches `topology_events` for the seed neighborhood. Result lands on `ContextBundle.topology_context`; the prompt builder renders a `<topology_context>` section.
+  - `config.py` — tuning knobs (top_n=80, decay_base=0.9, etc.). **S3:** `topological_k` (40), `topological_expand_neighborhoods` (true), `topological_max_neighborhood_members` (30).
+- **TriggerContext** (`primary.py`):
   ```python
   @dataclass
   class TriggerContext:
-    kind: TriggerKind  # T1, T2, T3, T4
+    kind: TriggerKind  # T1, T2, T3, T4, T6 (S3)
     observation_id: UUID | None
     model_id: UUID | None
     seed_entity_ids: list[UUID]
     seed_natural_text: str | None
     seed_occurred_at: datetime | None
     scope_actors: list[UUID]
+    # S3 — topology trigger payload (T6)
+    topology_event_id: UUID | None
+    topology_event_kind: str | None  # emergence|dissolution|split|merge|drift
+    neighborhood_id: UUID | None
+    member_model_ids: list[UUID]
+    # S3 — Pathway F seed override
+    precomputed_topo_vector: list[float] | None
+    topological_k: int = 40
+    topological_expand_neighborhoods: bool = True
   ```
 
 #### **services/greeting** (`/Users/rachinkalakheti/fyraliscore/services/greeting/`)
@@ -469,6 +553,7 @@ The system is organized as a single-process app with logical service boundaries.
     - `email.py` — email parsing
     - `linear.py` — Linear issue state extraction
     - `calendar.py` — calendar event extraction
+    - `system.py` — system-emitted observations (state changes from Recommendations/Acts handlers)
   - `handlers/__init__.py` — `CHANNEL_TRUST_MAP` (default trust tier per channel)
 - **Handler Contract** (`core.py:1-7`):
   ```python
@@ -482,10 +567,10 @@ The system is organized as a single-process app with logical service boundaries.
     entities_hint: list[str]  # ["rate limiter", "issue 2311"]
   ```
 
-#### **services/gateway** (`/Users/rachinkalakheti/fyraliscore/services/gateway/`)
-- **Purpose**: HTTP entry point; auth, rate limiting, request context
+#### **services/gateway** ([services/gateway/](services/gateway/))
+- **Purpose**: HTTP entry point; auth, rate limiting, request context; mounts all sub-routers
 - **Key Files**:
-  - `main.py:1-27` — FastAPI app builder; `build_app(pool, actor_repo, alias_repo, embedder, rate_limiter)` factory
+  - `main.py` — FastAPI app builder; `build_app(pool, actor_repo, alias_repo, embedder, rate_limiter)` factory
   - `auth.py` — `validate_token(token)`, `create_session(body)` helpers
   - `db_bootstrap.py` — pool creation, codec registration, schema validation
   - `logging_config.py` — structlog setup
@@ -494,6 +579,16 @@ The system is organized as a single-process app with logical service boundaries.
   - `BearerAuthMiddleware` — extracts `Authorization: Bearer <token>` or `X-Tenant-Id` header
   - `RateLimitMiddleware` — enforces per-tenant/actor quotas
   - `RequestContextMiddleware` — binds request_id, tenant_id to structlog context
+- **Mounted routers**:
+  - Rendering (RND) — `/rendering/*` via `include_router(rnd_router)`
+  - Greeting / CEO view (GRT) — `build_ceo_api_router()` + `build_ceo_stream_router()`
+  - Query (QRY) — `build_query_router()` (`/view/ceo/ask`, `/turn-action`)
+  - **Conversations** — `build_conversations_router()` (`/v1/cards/{id}/conversation`, `/probe`)
+  - **Recommendations** — `/v1/recommendations/*` plus `/stream` (SSE)
+  - **Today / History / Structure** — `/v1/today`, `/v1/history`, `/v1/structure`
+  - **Demo** — `/v1/demo/*` (gated on demo tenant config)
+  - Simulation — `/simulation/*` (when `GATEWAY_MOUNT_SIM=1`)
+  - Debug router — optional, gated on env
 
 #### **services/entity_aliases** (`/Users/rachinkalakheti/fyraliscore/services/entity_aliases/`)
 - **Purpose**: Map textual entity references to canonical entity IDs
@@ -506,6 +601,53 @@ The system is organized as a single-process app with logical service boundaries.
 - **Key Files**:
   - `repo.py` — `ActorRepo.resolve_by_source_actor_ref(channel, ref)` → UUID | None
   - Backing tables: `actors`, `actor_identity_mappings`
+
+#### **services/recommendations** ([services/recommendations/](services/recommendations/))
+- **Purpose**: First-class CEO action list — surfaces actionable Model-derived recommendations with archival, watch, and triage flows
+- **Key Files**:
+  - `repo.py` — `RecommendationsRepo`; backed by `recommendations` table (migration [0022](db/migrations/0022_recommendations.sql))
+  - `handlers.py` — wraps Acts/Resources mutation entry points; emits audit-trail `state_change` observations
+  - `watchers.py` — per-actor "watch for revision" subscriptions on recommendation cards via falsifier predicates (table `model_watchers`, migration [0027](db/migrations/0027_model_watchers.sql))
+- **FastAPI routes** (mounted in gateway):
+  - `GET /v1/recommendations` — list for actor
+  - `POST /v1/recommendations/{id}/act` — apply proposed change
+  - `POST /v1/recommendations/{id}/dismiss` — archive
+  - `POST/DELETE /v1/recommendations/{id}/watch` — falsifier subscription
+  - `POST /v1/recommendations/{id}/triage` — triage workflow
+  - `GET /v1/recommendations/stream` — **SSE** stream of created/updated events
+
+#### **services/conversations** ([services/conversations/](services/conversations/))
+- **Purpose**: Per-card conversation persistence — replaces static card detail sections with a probe-driven dialogue per the Driftwood revision
+- **Key Files**:
+  - `repo.py` — `card_conversations` and `card_exchanges` tables (migration [0024](db/migrations/0024_card_conversations.sql)); session-scoped dialogue state with probed phrases and used chip IDs
+  - `handler.py` — probe resolution: phrase/chip templates (cheap path) + free-form Ask routed through `QueryHandler` with card context
+  - `api.py` — routes mounted at `/v1/cards/{card_id}/conversation` and `/v1/cards/{card_id}/probe`
+
+#### **services/today** ([services/today/](services/today/))
+- **Purpose**: Read-only UI aggregator for the `/` Today page; derives severity/kind/tag/stats from Recommendations + Acts + Resources
+- **Key Files**:
+  - `aggregator.py` — severity formula (`expected_impact × confidence`) + proposition_kind classification
+  - `triage.py` — triage state aggregation
+- **Routes**: served by gateway at `GET /v1/today`; no DB tables of its own
+
+#### **services/history** ([services/history/](services/history/))
+- **Purpose**: Read-only UI aggregator for the `/history` page; reads observations/models/commitments/decisions chronologically
+- **Key Files**:
+  - `aggregator.py`
+- **Routes**: served by gateway at `GET /v1/history`; no DB tables of its own
+
+#### **services/demo** ([services/demo/](services/demo/))
+- **Purpose**: VC-pitch demo tenant infrastructure — multi-company demos (Pelago, Truss, Northwind, Meridian) with budget caps, per-tenant model routing, deterministic seeds, signal-injection sessions
+- **Key Files**:
+  - `repo.py` — backed by `tenants`, `demo_configs`, `demo_sessions`, `demo_session_costs` (migration [0023](db/migrations/0023_demo_infrastructure.sql))
+  - `sessions.py` — session lifecycle
+  - `budget.py` — per-session cost caps and enforcement
+  - `model_routing.py` — per-tenant LLM provider/model selection (overrides global default)
+  - `simulator.py` — signal-injection simulator for live VC walkthroughs
+  - `snapshot.py` — pre-baked substrate snapshots (see [demo/snapshots/](demo/snapshots/))
+  - `notifications.py`, `sse.py` — SSE plumbing for demo recommendation streams
+  - `router.py` — FastAPI routes under `/v1/demo/*`
+- **Corpora**: synthetic event streams in [corpora/pelago/](corpora/pelago/) (LSOB simulator + synthesis)
 
 #### **Other Services** (supporting)
 - **services/bridge** — external system integration stubs
@@ -528,7 +670,7 @@ The system is organized as a single-process app with logical service boundaries.
   - Indexes: HNSW on embeddings, GIN on JSON arrays, B-tree on common predicates
   - Partitions: observations by occurred_at (quarterly)
 
-- **`db/migrations/0002_*.sql` through `0019_*.sql`**:
+- **`db/migrations/0002_*.sql` through `0019_*.sql`** — early waves:
   - Actor sessions, Think trigger queue, entity review queue, relationship maintenance, calibration, access control, cost attribution, etc.
   - Example: `0004_think_trigger_queue.sql` creates:
     ```sql
@@ -544,6 +686,22 @@ The system is organized as a single-process app with logical service boundaries.
     );
     ```
 
+- **`db/migrations/0020_*.sql` through `0032_*.sql`** — V1 substrate, demo, audit, and self-organizing-substrate waves:
+  - **0020** `think_run_artifacts` — sidecar capture of each Think pipeline stage (trigger, retrieval, prompt, response, validation, apply, post_commit, cascade, error) for the debug UI
+  - **0021** Review-1 remediation: `commitments.is_maintenance`, `anomaly_thresholds` (per-tenant P90/P95/P99 rolling stats), `dedup_keys_seen` (publisher debounce ledger)
+  - **0022** Recommendations: `recommendations` table; `propositions.target_actor_id` generated column and `caused_act_change_id`; partial index for the CEO action-list ranker
+  - **0023** Demo infrastructure: `tenants` registry, `demo_configs` (model routing, cost cap, determinism seed), `demo_sessions`
+  - **0024** `card_conversations` — per-card conversation persistence with probed phrases and used chip IDs
+  - **0027** `model_watchers` — per-actor "watch for revision" subscriptions on recommendation cards with falsifier predicates
+  - **0028** Pelago demo company registration (alongside Truss / Northwind / Meridian)
+  - **0029** `reconciliation_events` — audit trail for reconciler decisions (`auto_merge`, `human_review`, `no_match`)
+  - **0030** **Audit chain (Q5)**: per-Model `audit_events` table with state transitions, `changed_fields`, re-assertion tracking, and reconciliation-merge provenance
+  - **0031** **Unified Model-to-Model edge primitive (S1)**: `model_edges` table — one row per typed edge (source, target, edge_kind, weight, metadata, status, detected_by, lifecycle audit) with 3 partial indexes (forward, backward, by-kind on `status='active'`). Also drops the `model_reeval_queue.cause_kind` CHECK so new edge_kinds can produce new cause_kinds via the registry's cascade callbacks. Dual-write phase: arrays on `models` remain authoritative; the chokepoint helper [_set_model_relations](services/models/repo.py) writes both sides; the [edge_drift worker](services/workers/edge_drift/) verifies parity. Six edge_kinds: `supports`, `contributes_to_resolution`, `instance_of`, `superseded_by` (enabled), `contradicts`, `weakens` (reserved). Per-kind semantics declared in [lib/shared/edge_registry.py](lib/shared/edge_registry.py).
+  - **0032** **Topology layer (S2)**: adds `models.topo_embedding VECTOR(128)` and `models.topo_updated_at` (positional embedding maintained by the updater worker); `topo_dirty_queue` (propagation queue with NULLS-NOT-DISTINCT dedup, priority-ordered by delta_magnitude); `model_neighborhoods` (materialized communities with stable IDs across re-clusterings, centroid + density + lifecycle); `model_neighborhood_membership` (reverse lookup with per-Model centrality). HNSW index on `topo_embedding` partial WHERE `status='active' AND topo_embedding IS NOT NULL`, ready for S3's Pathway F. Algorithms in [lib/topology/](lib/topology/) (content_anchor random projection, alpha-anchored update rule, connected-components detection, greedy Jaccard matching). Repos in [services/topology/](services/topology/). Workers in [services/workers/topology_updater](services/workers/topology_updater/) and [services/workers/neighborhood_detector](services/workers/neighborhood_detector/). Topology is **observable but not yet consequential** in S2 — S3 makes it consequential.
+  - **0033** **Topology phase events + T6 (S3)**: adds `topology_events` table — a durable log of phase transitions (`emergence`, `dissolution`, `split`, `merge`, `drift`) emitted by the neighborhood detector, with magnitude + heuristic `named_signature` + denormalized member snapshot + processed_at. Three indexes (tenant-recent, pending, by neighborhood). T6 trigger kind needs no schema change (the existing `think_trigger_queue.trigger_kind` is plain TEXT). Companion app changes: phase-event detector + heuristic naming wired into [NeighborhoodsRepo.recompute_for_tenant](services/topology/neighborhoods_repo.py); T6 enqueue in [neighborhood_detector worker](services/workers/neighborhood_detector/worker.py) (per-kind cap, processed-in-same-tx idempotency). Pathway F in [pathways.py](services/retrieval/pathways.py) (HNSW over `topo_embedding` + neighborhood-membership expansion), wired into [primary_retrieve](services/retrieval/primary.py) for T1-T4 (0.15 weight) and T6 (0.5 weight). Prompt in [services/think/prompt.py](services/think/prompt.py) gains a `<topology_context>` section + T6-specific operating instructions. `RetrievalConfig` gains `topological_*` knobs.
+  - **0034** **`relocate` claim_op + bounded cascade (S4)**: extends `topology_events.kind` CHECK to include `'relocate'` (the only schema change S4 needs — it sits on top of S2/S3 substrate). Companion app changes: `ClaimOp.op` literal in [services/think/diff_schema.py](services/think/diff_schema.py) gains `"relocate"` plus a `relocate_target: dict` field. Validator + applier ([services/think/validator.py](services/think/validator.py), [services/think/applier.py](services/think/applier.py)) route relocate ops through `TopoRepo.relocate`. New methods on TopoRepo: `relocate(model_id, target, reason)` (resolve target → blend → write → record `topology_events` row with kind='relocate' → bounded cascade) and `bounded_cascade(origin_model_id, base_delta, max_depth=2, max_fanout=20, damping=0.5)` (BFS over active edges, top-K-by-centrality fan-out cap per hop, geometric damping per depth, `topo_dirty_queue` UNIQUE-constraint dedup). New pure helpers in [lib/topology/relocate.py](lib/topology/relocate.py): `RelocateTarget` dataclass, `parse_relocate_target`, `blend_topo`, `select_bounded_neighbors`, `damped_magnitude`. System prompt in [services/think/prompt.py](services/think/prompt.py) documents the `relocate` shape + when to use it. Closes the substrate's reasoning loop: arrangement is now a first-class diff operation equal in standing to content.
+  - 0025 / 0026 are intentionally absent (skipped numbers).
+
 - **`db/seed/`**:
   - SQL and Python scripts to bootstrap test/demo data
   - `personas_seed.sql` — default personas for dogfood
@@ -557,29 +715,50 @@ The system is organized as a single-process app with logical service boundaries.
 - **Vite** 5.4.8 (dev server on :5173)
 - **TypeScript** 5.5.4
 - **TailwindCSS** 3.4.13 (styling)
+- **react-router-dom** 6.26.2 (multi-page routing)
+- **ws** 8.18.0 (WebSocket client; types via `@types/ws`)
 - **Playwright** 1.47.2 (e2e tests)
 - **Vitest** 2.1.2 (unit tests)
+- **autoprefixer**, **postcss** (CSS pipeline)
 
-**Key Components** (`ui/src/components/`):
-- **App.tsx:19-60** — root layout; lifts all state (active card, turns, input focus)
-- **TopBar.tsx** — navigation, logo, status indicator
-- **Greeting.tsx** — prose rendering of the greeting block
-- **QueryGrid.tsx** — query chip grid; each chip is a pre-loaded question
-- **Card.tsx** — card shell (observation, decision, or question kind)
+**Pages** ([ui/src/pages/](ui/src/pages/)):
+- `/` — **Today** (CEO cockpit; default surface)
+- `/structure` — **Structure** (relationship graph, resource aggregates, commitments)
+- `/history` — **History** (chronicle, arcs, predictions)
+- `/mind` — **MyMind** (loops, notes, reminders)
+- `/demo` — **DemoPicker** → **DemoLanding** (VC pitch entry)
+
+**Key Components** ([ui/src/components/](ui/src/components/)):
+- **App.tsx** — root layout; routes between Today/Structure/History/Mind/Demo via `react-router`; mounts global Sidebar, ShortcutsOverlay, TriageToast, ArtifactDrawer
+- **Sidebar.tsx** — left-rail nav across the five surfaces
+- **PageHeader.tsx**, **FilterBar.tsx**, **JustUpdated.tsx** — shared chrome
+- **RecCard.tsx** — recommendation/card shell (observation, decision, or question kind)
 - **CardExpanded.tsx** — expanded card with reasoning, evidence, action verbs
-- **GroundInput.tsx** — text input for CEO Ask; `/` shortcut to focus
-- **ConversationTurn.tsx** — rendered turn history from Ask/Answer pipeline
-- **CloseLine.tsx** — summary metrics (signal count, external moves, calibration)
-- **Icon.tsx** — Lucide icon wrapper with fallbacks
+- **AskZone.tsx** (formerly GroundInput) — text input for CEO Ask; `/` shortcut to focus
+- **Conversation.tsx**, **ConversationTurn.tsx**, **ThinkingTurn.tsx** — Ask/Answer dialogue rendering
+- **EmptyState.tsx**, **RoutedCoda.tsx**
+- **components/mind/** — `HoldPicker`, `LoopCard`, `NoteCard`, `ReminderCard`, `MindList`, `FilterPanel`, `MindLayerStrip`, `MindNarrativeBand`, `PromoteModal`
+- **components/history/** — `Chronicle`, `Arcs`, `EventPanel`, `Predictions`, `HistoryLayerStrip`, `HistoryNarrativeBand`
+- **components/structure/** — `RelationshipGraph`, `ResourceAggregateView`, `CommitmentList`, `MapControls`
+- **components/SignalSimulator/** — multi-tab in-UI signal injector (Email, GitHub, Calendar, Slack, Custom, Suggested)
 
-**Hooks** (`ui/src/hooks/`):
-- **useHome()** — fetches `GET /view/ceo/home`, subscribes to `WS /view/ceo/stream`
-- **useAsk()** — manages conversation turns; `ask(query)` → `POST /view/ceo/ask`
+**Hooks** ([ui/src/hooks/](ui/src/hooks/)):
+- `useToday()` — fetches `GET /v1/today`; subscribes to `WS /view/ceo/stream` and SSE updates (replaces the legacy `useHome`)
+- `useHistory()` — fetches `GET /v1/history`
+- `useMind()` — loops/notes/reminders state
+- `useConversation()` — per-card probe + dialogue state, posting to `/v1/cards/{id}/conversation` and `/probe`
+- `useRecommendationStream()` — **SSE** subscription to `/v1/recommendations/stream` for live recommendation events (used in demo mode)
+- `useAsk()` — Ask/Answer pipeline; `ask(query)` → `POST /view/ceo/ask`
 
-**API Layer** (`ui/src/api/`):
-- **types.ts** — TypeScript contracts (mirrors CONTRACTS.md)
-- **client.ts** — HTTP helpers with auth token injection
-- **websocket.ts** — WS subscription manager
+**API Layer** ([ui/src/api/](ui/src/api/)):
+- `types.ts`, `client.ts` — base contracts and HTTP client with auth-token injection
+- `stream.ts` — WebSocket subscription manager (`/view/ceo/stream`)
+- `today-types.ts`, `today-client.ts`, `today-mock.ts` — Today payloads
+- `history-client.ts`, `structure-client.ts` — page-specific clients
+- `recommendation-stream.ts` — **SSE** client for `/v1/recommendations/stream`
+- `demo-client.ts`, `demo-picker-client.ts` — demo session lifecycle
+- `auth.ts` — bearer / dev-token bootstrap
+- `mock-data.ts` — fixtures for offline UI dev
 
 **Styling**: Tailwind utility classes; custom variables for Company OS colors (serif font, highlight tint, citations).
 
@@ -624,10 +803,8 @@ Not fully populated in MVP; core infrastructure in place for Wave 6+ evaluation 
 
 | Script | Purpose |
 |--------|---------|
-| `setup.sh` | Interactive bootstrap from fresh clone (provider/key prompt, docker compose, venv, migrations, seed, npm) → `start.sh` |
-| `start.sh` | Bring up: gateway (:8000), workers, UI (:5173). Canonical entry point. |
-| `stop.sh` | Graceful SIGTERM → SIGKILL shutdown |
-| `dogfood_up.sh` / `dogfood_down.sh` | Thin wrappers around `start.sh` / `stop.sh` (kept for muscle memory) |
+| `dogfood_up.sh` | Bring up: gateway (:8000), workers, UI (:5173) |
+| `dogfood_down.sh` | Graceful SIGTERM → SIGKILL shutdown |
 | `dogfood_logs.sh` | Interleaved tail of all service logs |
 | `dogfood_inspect.sh` | One-shot tenant state summary |
 | `reset_dogfood_tenant_data.sh` | Purge synthetic data (keep personas) |
@@ -975,6 +1152,75 @@ CREATE TABLE actor_identity_mappings (
 - **`entity_aliases`** and **`entity_review_queue`**
   - Entity resolution worker uses these (Wave 2-B, not fully deployed)
 
+- **`recommendations`** (migration 0022)
+  - `id, tenant_id, target_actor_id, kind, proposed_change JSONB, expected_impact, confidence, state, created_at, archived_at`
+  - Indexed for the CEO action-list ranker via `(tenant_id, target_actor_id, state)` partial index
+
+- **`model_watchers`** (migration 0027)
+  - `id, tenant_id, actor_id, model_id, falsifier_predicate JSONB, fired_at, cleared_at`
+  - Per-actor "watch for revision" subscriptions tied to recommendation cards
+
+- **`card_conversations`** + **`card_exchanges`** (migration 0024)
+  - Per-card dialogue state: `probed_phrases JSONB`, `used_chip_ids UUID[]`
+  - Backs `/v1/cards/{id}/conversation` and `/probe`
+
+- **`think_run_artifacts`** (migration 0020)
+  - Per-stage sidecar for each Think run (trigger, retrieval, prompt, response, validation, apply, post_commit, cascade, error)
+  - Powers the debug UI
+
+- **`anomaly_thresholds`**, **`dedup_keys_seen`** (migration 0021)
+  - Per-tenant P90/P95/P99 rolling stats (T3 anomaly trigger gating)
+  - Publisher debounce ledger to suppress redundant ingest
+
+- **`reconciliation_events`** (migration 0029)
+  - Audit trail for the reconciler: `auto_merge` / `human_review` / `no_match`, with matched-model tracking
+
+- **`audit_events`** (migration 0030, Q5 audit chain)
+  - Per-Model state transitions, `changed_fields`, re-assertion tracking, reconciliation-merge provenance
+  - Written by `services/think/audit.py`; powers chain replay and contestability views
+
+- **`model_edges`** (migration 0031, S1 unified Model-to-Model edge primitive)
+  - `id, tenant_id, source_model_id, target_model_id, edge_kind, weight, metadata JSONB, status, detected_by, created_at, created_by_event_id, status_changed_at, status_reason`
+  - Three partial indexes on `status='active'` — forward (source, kind), backward (target, kind, **the new bidirectional capability**), and per-kind scan
+  - Replaces seven pre-S1 ad-hoc connection mechanisms (two array columns on `models`, pattern back-link, supersession lifecycle flag, transient queue, two latent proposition-encoded edges) with a single typed-edge table whose semantics are declared in [lib/shared/edge_registry.py](lib/shared/edge_registry.py) (per-kind: directed / symmetric, DAG cycle scope, weight rules, archive cascade callbacks, mutually-exclusive-with)
+  - Edge kinds in v1: `supports`, `contributes_to_resolution`, `instance_of`, `superseded_by` (enabled producers); `contradicts`, `weakens` (reserved names — repo refuses to insert until producers ship in later stages)
+  - Single writer: [services/models/edges_repo.py](services/models/edges_repo.py) (`EdgesRepo.link / unlink / traverse_forward / traverse_backward / mark_inert / check_no_cycle`)
+  - Dual-write chokepoint at [services/models/repo.py](services/models/repo.py) (`_set_model_relations`) keeps the legacy array columns (`supporting_model_ids`, `contributing_models`) in lockstep with `model_edges` rows. Drift detector worker at [services/workers/edge_drift/](services/workers/edge_drift/) samples every tenant on a 30-min cadence and emits a metric per drifted kind
+
+- **`models.topo_embedding`** + **`models.topo_updated_at`** (migration 0032, S2 topology layer columns)
+  - `VECTOR(128)`, NULL until first computed, indexed via partial HNSW (`models_topo_embedding_idx`) WHERE `status='active' AND topo_embedding IS NOT NULL`
+  - The Model's learned **positional vector**, distinct from the 768d content embedding. Initialized to `content_anchor()` (a fixed random projection of the content embedding, deterministic and L2-normalized) at INSERT inside `_insert_core`; refined continuously by the topology updater worker via the alpha-anchored neighbor-mean rule
+  - The HNSW index is in place now so it gets time to populate during the S2 soak window; S3's Pathway F will read it for topological retrieval
+
+- **`topo_dirty_queue`** (migration 0032, S2 propagation queue)
+  - `id, tenant_id, model_id, cause_model_id, hop_depth, delta_magnitude, enqueued_at, processed_at, attempts, last_error`
+  - Same dedup pattern as `model_reeval_queue`: UNIQUE NULLS NOT DISTINCT on `(tenant, model, processed_at)`. Pending rows ordered by `delta_magnitude DESC NULLS FIRST` so high-priority recomputes preempt routine ones
+  - Enqueued by: ModelsRepo.insert (initial topo computed synchronously, then enqueued for refinement); EdgesRepo.link / unlink / mark_inert (every endpoint affected by an edge change); the topology updater itself (when a recompute produces a significant delta, neighbors get enqueued at hop_depth + 1 with damped magnitude)
+  - Drained by [services/workers/topology_updater](services/workers/topology_updater/)
+
+- **`model_neighborhoods`** (migration 0032, S2 materialized communities; **S3** populates `named_signature`)
+  - `id, tenant_id, centroid_topo_embedding VECTOR(128), member_model_ids UUID[], emergence_at, predecessor_neighborhood_ids UUID[], named_signature, named_at, density, status (active|dissolved|merged), status_changed_at, status_reason, last_recomputed_at`
+  - Detected by [services/workers/neighborhood_detector](services/workers/neighborhood_detector/) via connected-components on the active edge graph (Louvain swap-out is a single function later); communities below `MIN_COMMUNITY_SIZE` (2) pruned to drop isolated singletons
+  - Stable IDs across re-clusterings: greedy Jaccard matching against existing active neighborhoods, threshold 0.3 (configurable). New communities without a match get a fresh id + emit `predecessor_neighborhood_ids` for any prior overlap. Unmatched previous neighborhoods → `status='dissolved'` with `status_reason='no_match_in_recompute'`
+  - **S3:** `named_signature` is now populated heuristically at recompute via [lib/topology/naming.py](lib/topology/naming.py) (top proposition_kinds + top scope entity/actor labels). LLM-assigned names are preserved (`COALESCE(named_signature, $heuristic)` on UPDATE; INSERT always sets it). T6 reasoning may overwrite via a claim_op.
+
+- **`model_neighborhood_membership`** (migration 0032, S2 reverse lookup)
+  - `tenant_id, model_id, neighborhood_id, centrality, joined_at`. PK `(model_id, neighborhood_id)`
+  - Per-Model centrality (degree centrality in v1, eigenvector / PageRank are stable swap-outs) for use by S3's neighborhood-summary in the LLM prompt
+  - Wholesale-refreshed by `recompute_for_tenant` — DELETE all + INSERT new is O(n) and cheaper than per-row diff tracking
+  - **S3 consumers:** Pathway F's neighborhood expansion query (top-K members per neighborhood by `centrality DESC`); the assembler's `_compute_topology_context` joins on it to build the prompt's neighborhood summary
+
+- **`topology_events`** (migration 0033, S3 phase-event log; **0034 (S4)** extends `kind` with `'relocate'`)
+  - `id, tenant_id, kind (emergence|dissolution|split|merge|drift|relocate), neighborhood_id, predecessor_neighborhood_ids UUID[], sibling_neighborhood_ids UUID[], member_model_ids UUID[], magnitude, named_signature, payload jsonb, occurred_at, processed_at`
+  - Three indexes: tenant-recent (CEO view / audit), pending (T6 dispatcher), by-neighborhood (history lookup)
+  - Written inside `NeighborhoodsRepo.recompute_for_tenant` in the same transaction as the upsert — atomicity matters: a recompute rollback rolls back the events too. The pure detector lives at [services/topology/events_repo.py](services/topology/events_repo.py): `detect_phase_events()` consumes the (prev neighborhoods, new communities, label-to-id, matched-prev-by-label, member-summaries) tuple and produces `PhaseEvent` rows.
+  - Magnitude semantics: `emergence` = new-community size, `dissolution` = old size, `merge` = combined size, `split` = balance `1 - largest_share/total`, `drift` = Jaccard distance from prior membership, **`relocate`** = L2 distance from previous topo to new topo. The relocate kind has `member_model_ids = [model_id]` (singleton) and a `payload` with `target_kind`/`target_ref`/`alpha`/`reason`/`applied_by_diff_id`.
+  - T6 enqueue happens in [neighborhood_detector worker](services/workers/neighborhood_detector/worker.py) `_enqueue_t6_for_events`: per-event payload includes event id, kind, neighborhood id, predecessors/siblings, members, generated `seed_natural_text`. Per-kind cap (`NEIGHBORHOOD_DETECTOR_T6_LIMIT_PER_KIND=10`) prevents tenant-wide recomputes from saturating the Think queue. Events past the cap are still recorded (CEO view sees them) but flagged `processed_at=now()` so they don't re-emit.
+
+- **`tenants`**, **`demo_configs`**, **`demo_sessions`**, **`demo_session_costs`** (migration 0023)
+  - Multi-tenant registry; per-tenant model routing + cost cap + determinism seed; per-session lifecycle and cost ledger
+  - Backs the public demo at `demo.fyralis.xyz` (Pelago, Truss, Northwind, Meridian)
+
 ---
 
 ## 6. External Dependencies
@@ -1014,9 +1260,9 @@ From `pyproject.toml:12-24`:
 | `DATABASE_URL` | Postgres connection | `postgresql://company_os:company_os@localhost:5432/company_os` |
 | `OLLAMA_URL` | Embeddings service | `http://localhost:11434` |
 | `OLLAMA_EMBED_MODEL` | Embedding model name | `nomic-embed-text` |
-| `LLM_PROVIDER` | Active provider | `anthropic` \| `openai` |
+| `LLM_PROVIDER` | Active provider (default `anthropic`) | `anthropic` \| `openai` \| `deepseek` |
 | `LLM_API_KEY` | Provider secret | (from env, not in .env) |
-| `LLM_MODEL` | Model name | `claude-opus-4-7` |
+| `LLM_MODEL` | Model name (default `claude-opus-4-7`) | `claude-opus-4-7` |
 | `LLM_TIMEOUT_SECONDS` | Call timeout | 30 |
 | `NEXUS_URL` | Agent attestation (Phase 4) | `http://localhost:8090` |
 | `DEFAULT_TENANT_ID` | Fallback tenant (dev only) | UUID |
@@ -1024,6 +1270,7 @@ From `pyproject.toml:12-24`:
 | `SLACK_SIGNING_SECRET` | Slack webhook verification | (from Slack app settings) |
 | `AUTH_BOOTSTRAP_SECRET` | Bearer token verification | (optional; if unset, no auth) |
 | `GATEWAY_OWNS_POOL` | Gateway manages DB pool lifetime | `0` (tests inject) / `1` (long-running) |
+| `DEBUG_ARTIFACT_CAPTURE` | Write `think_run_artifacts` rows | `1` (dogfood) |
 
 ### **.env.dogfood** (`/Users/rachinkalakheti/fyraliscore/.env.dogfood`)
 
@@ -1042,6 +1289,55 @@ Overrides for the single-gateway dogfood topology:
 | `GREETING_REFRESH_INTERVAL_SECONDS` | 900 | Refresh every 15 min |
 | `GRT_RENDERING_BASE_URL` | `http://127.0.0.1:8000` | Self-call for RND in single-gateway |
 | `DEBUG_ARTIFACT_CAPTURE` | 1 | Enable think_run_artifacts logging |
+
+### **Demo deployment env**
+
+The public demo (`demo.fyralis.xyz`) layers additional config used by `services/demo` and the per-tenant model-routing path:
+
+| Variable | Purpose |
+|---|---|
+| `DEMO_DEFAULT_TENANT` | Tenant slug when `/demo` is opened with no selection |
+| `DEMO_BUDGET_USD_PER_SESSION` | Per-session cost cap enforced by `services/demo/budget.py` |
+| `DEMO_MODEL_ROUTING_*` | Per-tenant LLM provider/model overrides |
+| `DEMO_DETERMINISM_SEED` | Optional seed for reproducible demo runs |
+| `LETSENCRYPT_HOST`, `VIRTUAL_HOST`, `VIRTUAL_PORT` | Picked up by `nginx-proxy` + `acme-companion` containers |
+
+---
+
+## 7a. Deployment & Infrastructure
+
+The repo ships a full container topology for the public demo at **`demo.fyralis.xyz`** (AWS Lightsail, 4 GB).
+
+### **Docker images**
+- [Dockerfile](Dockerfile) — Python 3.11; runs `uvicorn services.gateway.main:app` on `:8000`. Same image is reused for `gateway`, `think_worker`, and `post_commit_worker` (entrypoint overridden).
+- [Dockerfile.ui](Dockerfile.ui) — multi-stage Node 20 build → Nginx Alpine static server; cache-busting headers for hashed assets, long-lived cache for static, no-cache for `index.html`.
+
+### **docker-compose.yml** ([docker-compose.yml](docker-compose.yml))
+Nine services:
+
+| Service | Image | Role |
+|---|---|---|
+| `postgres` | `pgvector/pgvector:pg16` | Primary DB; healthcheck-gated |
+| `ollama` | `ollama/ollama:latest` | Embeddings; auto-pulls `nomic-embed-text` on boot |
+| `gateway` | local `Dockerfile` | FastAPI app on `:8000` |
+| `think_worker` | local `Dockerfile` | Runs `scripts/run_think_worker.py` |
+| `post_commit_worker` | local `Dockerfile` | Runs `scripts/run_post_commit_worker.py` |
+| `ui` | local `Dockerfile.ui` | React SPA served via Nginx |
+| `nginx-proxy` | `nginxproxy/nginx-proxy` | Reverse proxy; reads `VIRTUAL_HOST` labels |
+| `acme-companion` | `nginxproxy/acme-companion` | Let's Encrypt TLS issuance/renewal |
+| (volumes) | — | `pg_data`, `ollama_models`, `acme_certs`, `acme_html`, `nginx_vhost` |
+
+### **Nginx**
+- [nginx-ui.conf](nginx-ui.conf) — SPA routing (`try_files → index.html`); 1-year cache for static assets, no-cache for `index.html`.
+- [nginx/](nginx/) — vhost-overrides directory mounted into `nginx-proxy` (currently empty placeholder).
+
+### **TLS**
+- `acme-companion` issues and renews Let's Encrypt certs for `demo.fyralis.xyz` based on `LETSENCRYPT_HOST` labels on the `ui` and `gateway` services.
+
+### **Demo & corpora artifacts**
+- [demo/](demo/) — `generation/` (model generation pipeline), `snapshots/` (pre-baked substrate snapshots loaded for VC pitches).
+- [corpora/](corpora/) — `pelago/` (LSOB-generated event corpus), `pelago.jsonl.zst` (compressed event stream).
+- [truss_run/](truss_run/), [truss_run_2/](truss_run_2/) — adversarial harness execution artifacts (manifest, signals, snapshots, `model_events.jsonl`, `ground_truth.jsonl`, `final_substrate.json`, `summary_stats.json`, `errors.log`).
 
 ---
 
@@ -1082,19 +1378,21 @@ tests/
 
 ## 9. UI — Tech Stack & Pages
 
-### **Pages** (routes in `ui/src/App.tsx`):
-- **/** — CEO home view (main surface)
-  - Greeting (top)
-  - Query grid (chips)
-  - Cards (observations, decisions, questions)
-  - Close line (metrics)
-  - Conversation turns (from Ask/Answer)
-  - Ground input (CEO Ask field)
+### **Pages** (routes in [ui/src/App.tsx](ui/src/App.tsx) via `react-router`):
 
-### **WebSocket Connection** (`useHome()` hook):
-- **`WS /view/ceo/stream`** — subscribe to real-time updates
-- Receives messages: `{type: 'greeting_updated'}`, `{type: 'cards_updated'}`, `{type: 'query_grid_updated'}`, `{type: 'status_updated'}`
-- Heartbeat every 30s to detect disconnection
+| Route | Page | Surface |
+|---|---|---|
+| `/` | [Today](ui/src/pages/) (default) | CEO cockpit: recommendations, cards, AskZone, conversation turns |
+| `/structure` | [Structure](ui/src/pages/Structure.tsx) | Relationship graph, resource aggregates, commitments |
+| `/history` | [History](ui/src/pages/History.tsx) | Chronicle, arcs, event panel, predictions |
+| `/mind` | [MyMind](ui/src/pages/MyMind.tsx) | Loops, notes, reminders |
+| `/demo` | [DemoPicker](ui/src/pages/DemoPicker.tsx) → [DemoLanding](ui/src/pages/DemoLanding.tsx) | VC-pitch demo entry; selects company (Pelago/Truss/Northwind/Meridian), opens session |
+
+The legacy single-page "CEO home" surface has been split into Today (recommendations + ground input), Structure (the org graph), and History (the chronicle).
+
+### **Real-time Streams**:
+- **`WS /view/ceo/stream`** — view-cache updates (`greeting_updated`, `cards_updated`, `query_grid_updated`, `status_updated`); 30s heartbeat
+- **`SSE /v1/recommendations/stream`** — live recommendation `created` / `updated` events (preferred path in demo mode); managed by `useRecommendationStream()`
 
 ### **Styling**:
 - **Tailwind CSS** for utility classes
@@ -1106,13 +1404,15 @@ tests/
   - `.note` — secondary/parenthetical
 
 ### **Keyboard Shortcuts**:
-- **`/`** — focus ground input
+- **`/`** — focus AskZone
 - **`Esc`** — close expanded card
+- **`?`** — toggle ShortcutsOverlay
 
 ### **Error States**:
 - Missing cache keys → render partial with staleness warning
 - Offline mode → show cached state + "offline" indicator
 - Rendering failure → fallback prose + mock reasoning
+- Demo budget exhausted → banner + read-only fallback
 
 ---
 
@@ -1129,6 +1429,21 @@ tests/
   - Stub layer for future RBAC / field-level ACL
   - Currently: all authenticated users can read all tenant data
 
+- **Tenant isolation** (added 2026-05-10 — see §13):
+  - `lib/shared/tenant_context.py` — `tenant_transaction(tid)` opens a
+    Postgres transaction with `SET LOCAL app.current_tenant = tid`;
+    yields a `TenantContext` that quacks as an `asyncpg.Connection`.
+  - Migration 0036 — `tenant_isolation` RLS policy on 41 tenant-scoped
+    tables. Permissive default: code paths that don't yet use
+    `tenant_transaction()` see all rows; code paths that do get
+    defense-in-depth (a query that omits `WHERE tenant_id` cannot
+    return another tenant's rows; INSERT into the wrong tenant raises
+    `InsufficientPrivilegeError`).
+  - Migration 0037 — every `tenant_id` is `FOREIGN KEY REFERENCES
+    tenants(id) DEFERRABLE INITIALLY IMMEDIATE`. Production code
+    fails loudly on missing tenants; tests `SET CONSTRAINTS ALL
+    DEFERRED` and roll back, so the FK is never realized.
+
 ### **Logging & Observability**
 
 - **structlog** with JSON output:
@@ -1141,7 +1456,7 @@ tests/
   - Used for budget tracking and cost allocation
 
 - **Logs Output**:
-  - **`/tmp/fyralis_logs/{gateway,think_worker,post_commit_worker,ui}.log`** (local stack)
+  - **`/tmp/company_os_logs/{gateway,think_worker,post_commit_worker,ui}.log`** (dogfood)
   - Structured JSON lines; can be ingested into Datadog/Splunk
 
 ### **Error Handling**
@@ -1216,7 +1531,7 @@ Drawn from `simulation/scenarios/acme_tuesday.yaml:1-38`:
      - Recent state changes: all 7 observations
      - Active commitments: payment fix (due Monday), Acme followup (due Tuesday)
      - Anomalies: none (within expected variance)
-   - **Render greeting**: RND calls DeepSeek-chat
+   - **Render greeting**: RND calls the rendering model
      - Input: "Here are the key Models and recent signals. Write a concise greeting for the CEO."
      - Output: "Your Acme renewal is at risk due to payment service reliability concerns. Alice shipped the fix Monday morning; we're stabilizing. Decision call is Tuesday morning."
    - **Cache**: store in `view_ceo_cache` with cache_key='greeting'
@@ -1227,7 +1542,7 @@ Drawn from `simulation/scenarios/acme_tuesday.yaml:1-38`:
    - **Ask endpoint**: `POST /view/ceo/ask` with `{query: "what's our position on the Acme renewal?"}`
    - **Classify**: strategic query
    - **Retrieve**: second_pass context; re-rank Models with "Acme" in scope
-   - **Render**: RND calls DeepSeek-chat with Models, Commitments, Decisions about Acme
+   - **Render**: RND calls the rendering model with Models, Commitments, Decisions about Acme
    - **Response**: "Acme decision is this morning at 10 AM. As of Monday morning, payment infrastructure passed Alice's fix and is stabilizing. Sales (Tomas) is prepped with talking points. Priya's team monitors stability through the call."
    - **UI**: renders ConversationTurn with verbs: 'save', 'followup', 'done'
 
@@ -1274,7 +1589,7 @@ Drawn from `simulation/scenarios/acme_tuesday.yaml:1-38`:
 
 3. **Retrieval is Critical**: Four pathways (structural, semantic, temporal, pattern) ensure context diversity. Think receives the best-ranked Models from all paths merged and scored.
 
-4. **Rendering is Separate from Reasoning**: Think (DeepSeek-reasoner, complex reasoning) ≠ Rendering (DeepSeek-chat, prose generation). This separation allows:
+4. **Rendering is Separate from Reasoning**: Think (reasoning model, e.g. `claude-opus-4-7` or `deepseek-reasoner`) ≠ Rendering (chat model, e.g. `claude-sonnet-4-5` or `deepseek-chat`). This separation allows:
    - Fast iteration on voice/tone (Rendering)
    - Reuse of reasoning across multiple output formats
    - Cost optimization (reasoning is expensive, rendering is cheaper)
@@ -1292,6 +1607,387 @@ Drawn from `simulation/scenarios/acme_tuesday.yaml:1-38`:
    - Reproducible Think outcomes
    - Testable reasoning pipelines
    - Hypothesis-driven debugging
+
+---
+
+## 13. Architectural Overhaul — 2026-05-10
+
+A six-phase structural pass that promotes several conventions from
+"discipline of every author" to "constraint at the database / type
+system." Migrations 0035-0038, plus new modules in `lib/embeddings/`
+and `lib/shared/`. All phases ship together as a coherent stack — the
+`tenants` FK migration depends on the existence of every tenant_id
+in the registry, the RLS migration depends on a tenant-context
+mechanism, and the tenant context wrapper is the structural layer
+that finally lets RLS bite.
+
+### 13.1 `proposition_kind` constraint
+
+**Migration:** `db/migrations/0035_proposition_kind_constraints.sql`
+
+`models.proposition_kind` is a `GENERATED ALWAYS AS
+(proposition->>'kind') STORED` column added in 0002 with no CHECK
+and no NOT NULL declaration. Pydantic validated the proposition shape
+upstream, but the database had no defense against drift. This migration
+adds:
+
+```sql
+ALTER TABLE models ADD CONSTRAINT models_proposition_kind_valid CHECK (
+  proposition_kind IS NOT NULL AND proposition_kind IN (
+    'state', 'relation', 'prediction', 'pattern', 'pattern_instance',
+    'capability_assessment', 'hypothesis', 'concern',
+    'market_assessment', 'environmental_trend', 'recommendation'
+  )
+);
+```
+
+`IN (...)` implicitly rejects NULL, but the explicit `IS NOT NULL`
+documents the intent. NOT NULL on a GENERATED column can't be added
+via ALTER COLUMN, so the CHECK is the canonical mechanism.
+
+### 13.2 Pluggable embedder backend
+
+**New files:**
+- `lib/embeddings/base.py` — `Embedder` Protocol + shared error classes
+- `lib/embeddings/openai_backend.py` — `OpenAIEmbedder` (text-embedding-3-small + dimensions=768)
+- `lib/embeddings/factory.py` — `make_embedder(backend?)` resolves from env
+
+The codebase had a single concrete `OllamaClient` with no abstraction.
+This phase introduces a Protocol that any embedder must satisfy:
+
+```python
+class Embedder(Protocol):
+    @property def expected_dim(self) -> int: ...
+    @property def model_name(self) -> str: ...
+    async def embed(self, text: str) -> list[float]: ...
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
+    async def close(self) -> None: ...
+```
+
+`OllamaClient` now implements the Protocol natively (added
+`expected_dim` / `model_name` properties; aliased to `OllamaEmbedder`
+for the canonical name). `OpenAIEmbedder` is a new httpx-based
+implementation that uses the `dimensions` request parameter to project
+text-embedding-3-small from 1536d down to 768d, matching the existing
+`VECTOR(768)` schema without a column-level migration.
+
+`make_embedder()` selection rules (in priority): explicit `backend=`
+kwarg → `EMBEDDER_BACKEND` env var → implicit fallback (OpenAI when
+`OPENAI_API_KEY` set and `OLLAMA_URL` not, else Ollama).
+
+**Test coverage:** 42 tests across `lib/embeddings/tests/` —
+respx-mocked happy paths, dim-mismatch detection, retry / 429 /
+auth-header behavior, batch chunking, response-order preservation,
+factory backend resolution.
+
+### 13.3 Tenant context wrapper (`lib/shared/tenant_context.py`)
+
+Today's codebase carries `tenant_id` as an explicit argument on every
+repo call, with `WHERE tenant_id = $1` written by hand on every query.
+This phase introduces a structural alternative:
+
+```python
+async with tenant_transaction(tenant_id) as tctx:
+    await tctx.execute(
+        "INSERT INTO models (...) VALUES (...)",
+        ...
+    )
+    # Postgres-side `app.current_tenant` is set for the life of the tx.
+```
+
+`tenant_transaction()` opens an asyncpg transaction, calls
+`set_config('app.current_tenant', tenant_id::text, true)` so the
+setting is scoped to the surrounding transaction (no leak into the
+pool acquire), and yields a `TenantContext` that quacks like an
+`asyncpg.Connection` (delegates execute / fetch / fetchrow / fetchval /
+transaction / prepare). Repos that take `conn` accept a `TenantContext`
+unchanged.
+
+`bind_tenant(conn, tid)` binds a tenant to a connection that already
+has a transaction open — useful in tests and worker code paths that
+own their transaction.
+
+`current_tenant(conn)` reads `app.current_tenant` back, returning
+None when unset. Used in assertions and audit code paths.
+
+This module is the load-bearing primitive for §13.4 (RLS) — without
+a way to attach a tenant to a connection, the policies have nothing
+to read.
+
+### 13.4 Row-Level Security with permissive default
+
+**Migration:** `db/migrations/0036_rls_permissive_default.sql`
+
+Every tenant-scoped table gets RLS enabled and FORCE'd (without FORCE,
+the table-owner role bypasses policies, which defeats the safety net
+for our own application code that connects as the owner). One policy
+named `tenant_isolation` is installed:
+
+```sql
+USING (
+  current_setting('app.current_tenant', true) IS NULL
+  OR tenant_id = current_setting('app.current_tenant', true)::uuid
+)
+WITH CHECK (
+  current_setting('app.current_tenant', true) IS NULL
+  OR tenant_id = current_setting('app.current_tenant', true)::uuid
+)
+```
+
+The `IS NULL` branch is the **permissive default** — code paths that
+don't yet use `tenant_transaction()` see all rows, behavior unchanged.
+Code paths that DO use it get defense-in-depth enforcement: even a
+bug that omits `WHERE tenant_id = $1` cannot leak another tenant's
+rows. INSERT into the wrong tenant raises
+`InsufficientPrivilegeError` immediately.
+
+**Why permissive, not strict, today.** A flip to strict (drop the IS
+NULL branch) makes RLS mandatory — which means every code path must
+have already migrated to `tenant_transaction()` or it sees zero rows.
+That's a follow-up plan, gated on a sweep of every repo and worker
+to confirm 100% TenantContext adoption.
+
+**Coverage.** 41 of the ~50 tenant-scoped tables (the foundation
+tables, queues, caches, and substrate tables). Skipped: junction
+tables that inherit tenant via parent (`model_status_notes`,
+`commitment_contributors`, etc.); global registries (`tenants`,
+`demo_configs`); partitioned children (RLS on partitioned parent
+cascades to children automatically).
+
+**Test coverage:** 10 tests in `lib/shared/tests/test_rls_isolation.py`
+covering permissive default, isolated tenant reads, cross-tenant
+INSERT rejection, the `bind_tenant` flow, and policy presence.
+
+### 13.5 Tenant FKs
+
+**Migration:** `db/migrations/0037_tenant_fks.sql`
+
+Every tenant-scoped table gets a foreign key from `tenant_id` to
+`tenants(id)`, declared `DEFERRABLE INITIALLY IMMEDIATE`. 41 tables
+covered.
+
+**IMMEDIATE = production safety.** Code that forgets to register a
+tenant before its first INSERT fails loudly with a
+`ForeignKeyViolationError`, not silently with orphan rows.
+
+**DEFERRABLE = test ergonomics.** Most tests wrap their body in a
+single transaction and ROLLBACK at teardown (`tx_conn` fixtures
+across services/*/tests/conftest.py). They generate fresh tenant_ids
+via `uuid7()` without inserting a tenants row. The fixtures now
+issue `SET CONSTRAINTS ALL DEFERRED` immediately after starting the
+transaction, deferring FK checks to commit — which never fires for
+a rollback. Result: existing tests work unchanged; only commit-path
+tests need to insert a tenants row, and those have been updated
+explicitly.
+
+**Backfill.** The migration's first statement registers every
+tenant_id seen across all 41 tables into `tenants` (with
+`auto_backfill_<uuid>` as the name) so the FK addition succeeds on
+existing data. Deterministic + idempotent.
+
+### 13.6 `model_signal_readings` sidecar (foundation only)
+
+**Migration:** `db/migrations/0038_signal_readings_sidecar.sql`
+
+Today `models.signal_readings` is a JSONB array. This works under
+early evolution but prevents per-reading querying (count by kind,
+filter by date, traverse from event to model) without unrolling
+JSONB. The sidecar is a typed table:
+
+```sql
+CREATE TABLE model_signal_readings (
+  id UUID PRIMARY KEY,
+  model_id UUID NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  reading_kind TEXT NOT NULL CHECK (reading_kind IN
+    ('confirm', 'contest', 'observe', 'falsify')),
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source_event_id UUID,
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+```
+
+Three indexes: `(model_id, observed_at DESC)`,
+`(tenant_id, reading_kind, observed_at DESC)`, and a partial
+`(source_event_id) WHERE source_event_id IS NOT NULL` for the
+"every Model whose contestation came from event X" reverse query.
+
+**This migration is foundation-only.** No producer code is changed;
+`models.signal_readings` JSONB remains authoritative. The cutover
+plan is staged:
+
+| Stage | Work | Status |
+|---|---|---|
+| A | Create sidecar table + RLS policy | DONE (0038) |
+| B | Dual-write — every producer that appends to JSONB also INSERTs into the sidecar | TODO (separate plan) |
+| C | Backfill JSONB → sidecar for legacy rows | TODO (separate plan) |
+| D | Cutover readers; drop JSONB column after two weeks of green | TODO (separate plan) |
+
+**Test coverage:** 5 tests in
+`services/models/tests/test_signal_readings_sidecar.py` —
+schema acceptance of all 4 kinds, CHECK rejection of unknown kinds,
+default observed_at, ON DELETE CASCADE, and RLS isolation.
+
+### 13.7 Recommendation promotion (DEFERRED)
+
+The architectural ideal is to promote `proposition_kind = 'recommendation'`
+out of `models` into its own table, because recommendation Models have
+a different lifecycle (no confidence updates after insert, immutable
+target_act_ref, distinct archive reasons) and ~8 services already filter
+on `proposition_kind = 'recommendation'` in retrieval and rendering paths.
+
+This is **explicitly deferred** to a separate plan. Reasons:
+
+- **Multi-day refactor.** New table + dual-write + reader cutover +
+  test rewrites across 8+ services. Not safely scoped to a single
+  session.
+- **No structural blocker today.** With migration 0035's CHECK
+  constraint and the sidecar pattern proven in 0038, the foundation
+  is in place. The path is clear; the timing isn't.
+- **Risk profile.** Recommendation flows are user-visible (the
+  CEO action list). A bug in the cutover surfaces immediately to the
+  customer, unlike the silent structural improvements in 13.1-13.6.
+
+The follow-up plan should:
+1. Create `model_recommendations` table mirroring the recommendation-
+   specific Model fields (`target_actor_id`, `caused_act_change_id`,
+   target_act_ref structure, archive reasons restricted to recommendation set).
+2. Dual-write from `services/think/applier.py` and the demo SQL emit.
+3. Backfill from existing `models WHERE proposition_kind = 'recommendation'`.
+4. Cut over readers in `services/recommendations/`, `services/today/`,
+   `services/conversations/`, `services/gateway/main.py` recommendation routing.
+5. Drop `'recommendation'` from the proposition_kind allowed values.
+
+### 13.8 Schema-per-tenant (DEFERRED)
+
+Earlier analysis raised the question of moving `tenant_id` from a
+row-level column to a schema-level boundary (separate Postgres
+schemas per tenant, `SET search_path` to switch). The structural
+case is strong (single source of truth, per-tenant ops become trivial,
+no risk of cross-tenant query bugs).
+
+This is **explicitly deferred** because the wins delivered by 13.3
+(tenant context) + 13.4 (RLS) + 13.5 (FKs) capture ~80% of the
+schema-per-tenant benefit at ~5% of the migration risk. The argument
+for a full schema-per-tenant cutover should be revisited only when
+one of these is true:
+
+- Per-tenant ops (backup, GDPR-delete, sandbox-clone) become a hot
+  path, OR
+- Cross-tenant query latency under RLS becomes a measurable problem
+  (today the partial-index pattern keeps RLS-filtered queries cheap), OR
+- Tenant count drops by an order of magnitude (e.g. enterprise-only
+  pivot) such that the schema multiplication is bounded.
+
+Until then, the row-level boundary with FK + RLS is the right
+position.
+
+### 13.9 Migrations summary
+
+| # | File | Purpose |
+|---|---|---|
+| 0035 | `proposition_kind_constraints.sql` | CHECK pinning kind to 11-value set |
+| 0036 | `rls_permissive_default.sql` | RLS + tenant_isolation policy on 41 tables |
+| 0037 | `tenant_fks.sql` | FK from every tenant_id to tenants(id), DEFERRABLE INITIALLY IMMEDIATE |
+| 0038 | `signal_readings_sidecar.sql` | `model_signal_readings` table foundation |
+
+### 13.10 New library modules
+
+| Path | Purpose |
+|---|---|
+| `lib/embeddings/base.py` | `Embedder` Protocol + shared error types |
+| `lib/embeddings/openai_backend.py` | OpenAI embeddings via httpx, dimensions=768 |
+| `lib/embeddings/factory.py` | `make_embedder()` env-driven selection |
+| `lib/shared/tenant_context.py` | `TenantContext`, `tenant_transaction`, `bind_tenant`, `current_tenant` |
+
+### 13.11 Test infrastructure changes
+
+- `services/models/tests/conftest.py`, `services/topology/tests/conftest.py`,
+  `services/access_control/tests/conftest.py`, `services/observations/tests/conftest.py`,
+  `services/retrieval/tests/conftest.py`,
+  `services/workers/calibration_updater/tests/conftest.py`: every `tx_conn`
+  fixture issues `SET CONSTRAINTS ALL DEFERRED` immediately after
+  `await tx.start()`. Tenant FK is deferred to commit (which never
+  fires for the rollback teardown).
+- `services/observations/tests/conftest.py`: `tenant_id` fixture is
+  now async + inserts into the `tenants` table for commit-path tests.
+- `services/access_control/tests/conftest.py`: helpers gain
+  `_ensure_tenant(conn, tid)` which they call before any tenant-scoped
+  INSERT (covers committed_conn tests).
+- Test files with their own local `tx_conn` fixtures
+  (`services/topology/tests/test_adversarial_extra.py`,
+  `services/think/tests/test_relocate_*.py`,
+  `services/workers/neighborhood_detector/tests/test_t6_adversarial.py`,
+  `services/retrieval/tests/test_pathway_f*.py`): same SET CONSTRAINTS
+  treatment.
+
+### 13.12 Test results
+
+After the overhaul: 524 passing, 3 pre-existing failures unrelated to
+this change (the `4w` falsifier-grammar tests + the
+`test_notify_fires_after_commit` flake documented in its own docstring
++ one pgvector codec test). No regressions introduced by the overhaul
+itself.
+
+### 13.13 PCA → UMAP for the CEO Map projection
+
+Shipped concurrently with the Map view (Phase 14 below) and worth
+calling out as a separate decision.
+
+**The problem.** The first cut of the Map view used PCA to project
+128-d topo embeddings into 2D for layout. Initial review (during
+visual verification) flagged this as misleading:
+
+- PCA captures *linear* variance only. For a substrate with topology
+  shaped by the alpha-anchored neighbor-mean update rule (S2), it
+  typically explains <30% of the variance in 2D.
+- Watercolor neighborhood washes drawn on top of PCA-projected
+  positions visually claimed "near = semantically related" while the
+  projection itself was dropping ~70% of the topological information.
+- The "Snap to topology" toggle reinforced the lie by implying the
+  projection IS the topology rather than a distortion of it.
+
+**The fix.** Replaced [services/topology/pca_projector.py](services/topology/pca_projector.py) with [services/topology/umap_projector.py](services/topology/umap_projector.py). UMAP preserves *local* structure (k-nearest neighbors) at the cost of
+warping global distances — exactly the right trade for a CEO-facing
+view, because the question users ask is "what's near this belief?"
+(local), not "are these regions of the substrate far apart?" (global).
+
+| Property | PCA (old) | UMAP (new) |
+|---|---|---|
+| Local neighborhood preservation | Poor | High |
+| Global distance fidelity | Mediocre | Poor |
+| Cluster boundary visibility in 2D | Weak | Strong |
+| Compute cost | O(d²) — cheap | O(n^1.14) — moderate |
+| Cache shape | means + components | projected coords |
+| Configured metric | Euclidean | cosine (matches substrate's similarity notion) |
+
+**Honesty contract.** UMAP's lossiness is surfaced in the UI as a
+[FidelityBadge](ui/src/components/map/MapRenderer.tsx) showing the **trustworthiness score** (`sklearn.manifold.trustworthiness`,
+k=7 — the fraction of each point's k-nearest neighbors in 128-d that
+remain k-nearest neighbors in 2D). The badge color-codes severity:
+≥85% = "High fidelity" (sage), 65-85% = "Approximate" (warm amber),
+<65% = "Heavily warped" (coral). When the tenant has too few models
+for UMAP to fit, the badge says "Force-laid out" — telling the user
+positions are decoration, not topology.
+
+**Migration impact.**
+- Backend: `RefreshProjectionResponse.explained_variance_ratio` →
+  `RefreshProjectionResponse.trustworthiness` + `n_neighbors` + `min_dist`.
+- Backend: `MapSnapshotResponse` gains `projection_trustworthiness: float | None`.
+- Frontend: "Snap to topology" toggle removed entirely. UMAP positions
+  are used unconditionally when present; force-directed when not.
+- Cache: `view_ceo_cache` row keyed `map_pca_projection_v1` is no
+  longer read; new key is `map_umap_projection_v1` (different shape
+  prevents cross-pollution).
+- Floor: `MIN_MODELS_FOR_PCA = 3` → `MIN_MODELS_FOR_UMAP = 6` (UMAP
+  needs n_neighbors+1 points minimum; default n_neighbors=15 capped
+  to model_count-1).
+- Dependency: `umap-learn>=0.5` added (transitively brings in numba
+  + llvmlite). Pytest filterwarnings extended to ignore UMAP/numba
+  noise.
+- Tests: 12/12 pass against UMAP. The two PCA-specific assertions
+  (model_count thresholds, explained_variance_ratio shape) were
+  rewritten for UMAP semantics.
 
 ---
 
