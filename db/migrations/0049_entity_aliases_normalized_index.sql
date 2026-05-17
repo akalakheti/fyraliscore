@@ -39,6 +39,13 @@
 -- it serves the by-raw-text retrieval path.
 -- ---------------------------------------------------------------------
 
+-- migration:no-transaction
+-- ^ Explicit opt-in for the migration runner's non-transactional
+-- dispatch (lib/shared/migrations.py:_needs_no_transaction). The
+-- runner ALSO detects the CONCURRENTLY keyword below as a fallback,
+-- but the explicit marker is the authoritative signal and the one a
+-- reviewer should look for.
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS entity_aliases_normalized_idx
     ON entity_aliases (
         tenant_id,

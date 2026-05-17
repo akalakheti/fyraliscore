@@ -255,9 +255,28 @@ async def test_functional_index_used_in_explain(db_pool: asyncpg.Pool):
             tenant_id,
             ["acme corp", "big feature"],
         )
-        plan_text = json.dumps(plan)
+        # asyncpg returns EXPLAIN (FORMAT JSON) as a TEXT-typed JSON
+        # string for fetchval — parse it before structural inspection.
+        plan_list = json.loads(plan) if isinstance(plan, str) else plan
+        plan_text = json.dumps(plan_list)
+        # Two-condition assertion: an Index/Bitmap-Index node names
+        # `entity_aliases_normalized_idx` AND it is an index scan node
+        # (not Seq Scan — already excluded by enable_seqscan=OFF, but
+        # asserting the node-type explicitly guards against a plan
+        # over a different index slipping past the name check).
         assert "entity_aliases_normalized_idx" in plan_text, (
             "0049 functional index not used by the LLD §1.6 canonical "
             "query. Expression mismatch with normalize_phrase()? "
             "Plan was: " + plan_text
+        )
+        plan_root = plan_list[0]["Plan"]
+        node_type = plan_root.get("Node Type", "")
+        index_name = plan_root.get("Index Name", "")
+        assert node_type in ("Index Scan", "Bitmap Index Scan"), (
+            f"Expected Index Scan / Bitmap Index Scan, got {node_type!r}. "
+            f"Plan: {plan_text}"
+        )
+        assert index_name == "entity_aliases_normalized_idx", (
+            f"Plan used wrong index {index_name!r} (likely the legacy "
+            f"aliases_text_idx). Plan: {plan_text}"
         )
