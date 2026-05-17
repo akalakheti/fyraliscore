@@ -259,6 +259,7 @@ Six milestones. Each has a gate; no milestone starts until the previous one's ga
 4. Runbook `ops/runbooks/ingestion-cutover.md` reviewed and signed off.
 5. Diagnostic queries (Block 2 + new ones) results in hand or explicit acknowledgment that proceeding without them is acceptable.
 6. Product call on WS-latency tolerance answered → Mode A vs Mode A+B decision made (see §6 Q4).
+7. **`services/ingestion/tests/test_ingest_core.py` is green in CI** — must be green before condition (2)'s shadow-comparison result can be evaluated meaningfully. The shadow comparison measures count parity between the inline `ingest()` and the new Kafka-path writer; count parity is not correctness parity. If the legacy baseline has no verified behavioural coverage in CI, the gate is comparing two unverified paths against each other. Tracked under GitHub #31 (filed during M1 closeout, 2026-05-17). Pre-condition: the suite's 15 pre-existing FK-violation failures (root cause: missing `tenants` seed in the test setup) must be fixed and a CI workflow added that exercises them.
 
 **Changes:**
 - `services/ingestion/feature_flags/client.py` + `circuit_breaker.py` — full implementation per LLD §11.1 + §11.2.
