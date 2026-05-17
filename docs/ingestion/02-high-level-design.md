@@ -2,6 +2,8 @@
 
 **Scope:** Production-grade backfill ingestion pipeline for Slack, GitHub, Discord, Gmail. Adopts the Temporal + Kafka + S3 + Redis stack mandated by the brief. Designed for full-history backfill with a recency-first "feels onboarded" moment in ≤15 minutes, plus steady-state webhook/gateway ingestion converged onto the same data plane. Brownfield: existing handlers, OAuth substrate, and observation schema are preserved; everything else around them is reshaped.
 
+*Version 2.1 — incorporates verification corrections from Group A (UNIQUE index retraction), Group C (content-based feels_onboarded), and Groups D/E/F/G (deferred decisions and omissions). See git history for v2.0.*
+
 This document answers **why this shape?** Implementation specifics (DDL, activity step-by-step, code shapes) live in `03-low-level-design.md`.
 
 ---
@@ -192,7 +194,7 @@ sequenceDiagram
     Wr->>DB: BEGIN; INSERT observations; INSERT think_trigger_queue; COMMIT
     Wr->>KProg: shard.fetched (when shard's normalized rows are written)
 
-    Note over TMP,KProg: When 80% of recency-bucket-0 shards complete<br/>OR 15 min elapses:
+    Note over TMP,KProg: When last 7 days of observations are queryable<br/>for this source (source-side count vs observation-side count<br/>gap below reconciliation threshold):
     TMP->>KProg: source.onboarding.feels_onboarded
 ```
 
@@ -202,7 +204,7 @@ The workflow then spawns `ShardFetchWorkflow` children with concurrency capped p
 
 The normalizer pool consumes raw envelopes, pulls the body from S3, dispatches through the existing handler registry to produce `ObservationDraft` JSON, and publishes to `ingestion.normalized` keyed by `tenant_id` (ensures ordering per tenant; cross-tenant work parallelises). The observation writer consumes batches and runs the existing `ingest()` persist path: actor resolve, entity extract, atomic INSERT + `think_trigger_queue` enqueue, post-commit `NOTIFY observations_new`. The embedding worker is decoupled — it consumes a separate topic populated by the writer, calls Ollama, UPDATEs the row, and flips `embedding_pending=FALSE`.
 
-The Bridge Layer subscribes to `onboarding.progress`. The "feels onboarded" event fires when either 80% of the highest-recency bucket has completed OR 15 minutes have elapsed since `tenant.onboarding.started`, whichever first.
+The Bridge Layer subscribes to `onboarding.progress`. The "feels onboarded" event for each source fires when the last 7 days of observations for that source are queryable — specifically, when the source-side count of events in `[now - 7d, now]` minus the observation-side count for the same window is below the reconciliation threshold (0.1% or 5 absolute, whichever larger). A separate ops-only `tenant.onboarding.behind_schedule` event fires if 15 minutes have elapsed with no source achieving `feels_onboarded` yet; this is for alerting, not for the user-facing UI.
 
 ### Steady-state flow (Webhook arrival → observation)
 
@@ -233,7 +235,7 @@ sequenceDiagram
     Wr->>DB: same path
 ```
 
-**Narrative:** Identical from `ingestion.raw` onward. The webhook router still does the security work (signature verification, replay-cache check for GitHub, tenant resolution) but stops short of calling `ingest()` synchronously. The HTTP 200 acknowledgment is returned as soon as the raw payload is durable in S3 and the Kafka publish has succeeded. End-to-end p95 (webhook arrival to observation row visible) targets ≤5 seconds; the existing 1.5 s inline target is replaced by a 1.5 s ingress-only target (S3 PutIfAbsent + Kafka publish) plus a separate 2–3 s normalizer-pool processing budget.
+**Narrative:** Identical from `ingestion.raw` onward. The webhook router still does the security work (signature verification, replay-cache check for GitHub, tenant resolution) but stops short of calling `ingest()` synchronously. The HTTP 200 acknowledgment is returned as soon as the raw payload is durable in S3 and the Kafka publish has succeeded. Steady-state end-to-end p95 latency target is deferred to Phase 3 LLD pending two prerequisites: (a) measurement of the current inline-path baseline (the 1.5s figure in IN-13 plan.md is a target, not a measurement), (b) audit of downstream consumers of `observations_new` to identify latency contracts. The architectural floor is ~200ms p95 (single round-trip S3, Kafka, normalizer, single-row INSERT). The default writer batching (500/txn) trades ~500ms of batch-wait for ~10x throughput; the LLD picks the operating point after measurement.
 
 The Discord Gateway worker follows the same path: each `MESSAGE_CREATE` frame is written to S3 (keyed by `message.id`-based content hash to be safe under retransmission), envelope published to `ingestion.raw`. The Gmail Pub/Sub endpoint triggers a small Temporal activity (`HistoryDrainActivity`) that runs `users.history.list` and publishes each returned message ID's fetch result into `ingestion.raw`, reusing the same machinery as backfill.
 
@@ -282,7 +284,7 @@ The `{install_id}` prefix on Gmail scopes the dedup to one Fyralis-managed insta
 
 **Backfill-specific concern:** the GitHub `search/issues` API returns issues and PRs that the webhook stream would also deliver. Both produce identical `node_id` external IDs. The observation `UNIQUE(source_channel, external_id, occurred_at)` index drops the second write. The Slack `conversations.history` API returns messages with the same `(channel_id, ts)` pair as the webhook stream — same UNIQUE catches it. No special "is this a backfill or a webhook?" branching is required anywhere downstream.
 
-**Where the existing UNIQUE constraint is wrong:** including `occurred_at` in the unique key means an event whose `occurred_at` changes between two arrivals (theoretical; not observed in any source) would double-insert. The LLD will propose tightening to `UNIQUE(tenant_id, source_channel, external_id)` and adding `tenant_id` to the dedup key — currently the index is global per `source_channel`, which works only because the source-native IDs are themselves globally unique. With `(install_id)` prefixing now standard, the `tenant_id` column is the cleaner scoping; the migration is additive (build new index concurrently, drop old).
+*The current `UNIQUE(source_channel, external_id, occurred_at)` is correct and intentional. Handlers for stateful entities (GitHub PRs/issues/comments/reviews/check_runs, Linear issues/comments/projects, Calendar events) produce one observation per state transition with the same `external_id` and a fresh `occurred_at`. Dropping `occurred_at` from the key would silently reject those updates. The lack of `tenant_id` in the constraint is safe because every source's native identifier space is globally unique by construction (Slack channel IDs and `ts`, GitHub `node_id`, Discord snowflakes, Gmail RFC 5322 Message-ID with `{install_id}:` prefix). No index migration in this design.*
 
 ### Rate Limiting
 
@@ -378,7 +380,7 @@ Envelopes are bounded (~1–4 KB); bodies are pointer-only. This keeps Kafka thr
 
 1. **Kafka partition affinity.** All `ingestion.*` topics are partitioned by `tenant_id`. A noisy tenant's messages queue up behind their own partition's consumer; other tenants' partitions process independently. Partition count = 64 default (multi-pod consumer parallelism); scale to 256 if heavy tenants concentrate on too few partitions.
 2. **Per-tenant Redis token buckets.** Per "Rate Limiting" above. A tenant who exhausts their bucket cannot dilute other tenants' headroom.
-3. **Temporal task queue per source, not per tenant.** Workflow IDs include `tenant_id` so Temporal serializes per-tenant; one shared task queue per source gives global concurrency capping (e.g., max 50 in-flight `ShardFetchWorkflow`s on the `github` queue) which we then partition fairly across tenants via the `SourceOnboardingWorkflow`'s semaphore. Per-tenant queues were considered and rejected: queue count grows with tenant count and Temporal sizing becomes awkward.
+3. **Temporal task queue per source.** Per-source task queues are the v1 default. Cross-tenant scheduling on a shared queue is FIFO; the per-workflow concurrency cap inside `SourceOnboardingWorkflow` prevents one tenant from burst-scheduling onto the queue but does not provide weighted fairness. Acceptable for v1. Premium-tier or pathological tenants can be moved to dedicated per-tenant task queues (`{source}-tenant-{tenant_id}`) via an opt-in flag on the tenant row; this is an additive change requiring no architectural rework. Workflow IDs already include `tenant_id`, and task queue selection at `start_workflow` time is straightforward.
 4. **DB connection pool per worker class.** Observation writer has its own asyncpg pool sized for batch INSERT throughput; embedding worker has its own (lower-throughput, longer-held); planner activities use a small ad-hoc pool. A runaway in one class cannot starve another.
 5. **Normalizer process-per-core, OS-level isolation.** A single tenant's CPU-pathological payload (e.g., a giant Slack message) is processed by one process; other processes continue. Failed-process restart is automatic via the pool supervisor.
 
@@ -389,6 +391,12 @@ Envelopes are bounded (~1–4 KB); bodies are pointer-only. This keeps Kafka thr
 - **Replay tool**: a one-shot CLI/Temporal-workflow that reads from `ingestion_failures WHERE resolved_at IS NULL`, fetches the raw payload from S3 by `raw_s3_key`, re-publishes to `ingestion.raw`. The dedup property (source-native external_id) makes this safe to run multiple times.
 
 **What is not isolated:** Postgres itself. A single tenant cannot DOS the database via observations (per-source token bucket caps inbound rate; UNIQUE-violation rollbacks are cheap), but they could via pathological observation content (giant JSONB, huge entity arrays). Hard caps on `content_text` size (32 KB) and `entities_mentioned` length (256 entries) are added in the LLD.
+
+### Database Connection Topology
+
+*The normalizer pool's CPU-bound work is decoupled from DB I/O. **Path B (per verification F4): normalizer is pure transform, all DB enrichment moves to the observation writer.** Writer batches actor resolution and entity-alias lookups using `WHERE x = ANY($1::text[])` queries, reducing per-observation query count from ~54 to ~7.*
+
+*PgBouncer is mandatory: transaction-mode, `statement_cache_size=0` on every asyncpg pool, deployed as a sidecar or as a managed service. The codebase's current direct-asyncpg topology will not survive the connection count under the proposed worker fleet. Sizing math and pool configuration land in LLD.*
 
 ### Reconciliation
 
@@ -429,10 +437,11 @@ Envelopes are bounded (~1–4 KB); bodies are pointer-only. This keeps Kafka thr
 |---|---|---|
 | `tenant.onboarding.started` | `TenantOnboardingWorkflow` start | `{tenant_id, started_at, sources: [slack, github, ...], eta_minutes}` |
 | `source.onboarding.started` | `SourceOnboardingWorkflow` start | `{tenant_id, source, started_at, planned_shard_count}` |
-| `source.onboarding.feels_onboarded` | 80% of recency-bucket-0 shards complete OR 15 min elapsed | `{tenant_id, source, observations_count, recency_window_days}` |
+| `source.onboarding.feels_onboarded` | Last 7 days of observations queryable for this source. Specifically: source-side count of events in `[now - 7d, now]` minus observation-side count for the same window is below the reconciliation threshold (0.1% or 5 absolute, whichever larger). | `{tenant_id, source, observations_count, recency_window_days}` |
 | `shard.fetched` | All normalized rows for a shard durable in `observations` | `{tenant_id, source, shard_id, observation_count, fetched_in_seconds}` |
 | `source.onboarding.complete` | All shards (incl. reconciliation) done | `{tenant_id, source, total_observations, total_seconds, gaps_resolved}` |
 | `tenant.onboarding.complete` | All sources done | `{tenant_id, total_observations, completed_at}` |
+| `tenant.onboarding.behind_schedule` | Emitted to ops only (not user-facing). Fires if 15 min elapsed since `tenant.onboarding.started` and no `source.onboarding.feels_onboarded` has fired for any source. | `{tenant_id, sources_pending: [...], shard_progress: {...}}` |
 
 **Delivery semantics:** at-least-once. Bridge consumers must dedup on `(event_type, tenant_id, source, shard_id_or_null)`. Idempotent on retry — the same event published twice is identical.
 
@@ -450,12 +459,13 @@ Envelopes are bounded (~1–4 KB); bodies are pointer-only. This keeps Kafka thr
 - [services/webhooks/tenant_resolver.py](services/webhooks/tenant_resolver.py) — DB-backed resolver continues to map (provider, payload, headers) → tenant.
 - [lib/shared/secrets/](lib/shared/secrets/) — Fernet envelope encryption, `encrypted_secrets` table.
 - All existing OAuth substrate tables (`provider_installations`, `oauth_install_states`, `installation_audit_log`) and the per-integration OAuth callback handlers.
-- `observations` table schema (with one additive change — see "tightened UNIQUE" under Idempotency above; LLD covers the index migration).
+- `observations` table schema. The `UNIQUE(source_channel, external_id, occurred_at)` constraint is intentional and unchanged (see Idempotency above).
 - `think_trigger_queue` table and the Postgres NOTIFY mechanism.
 - All existing per-integration lifecycle handlers (Slack `app_uninstalled`, GitHub `installation.deleted`, Discord outbound 401/403 chokepoint).
 
 **Changes shape (same code purpose, different surroundings):**
 
+- OAuth callbacks ([services/integrations/{slack,github,discord,gmail}/oauth.py](services/integrations/)): introduce a transactional outbox table `onboarding_triggers` written in the same transaction as the install row. A Temporal Schedule polls the outbox every 5s and starts `TenantOnboardingWorkflow` for each unconsumed row. Gmail's existing fire-and-forget `_provision_install` is replaced by an outbox row; this fixes a current production bug where gateway-restart between commit and `asyncio.create_task` can leave installs without provisioning. Detailed table schema and Schedule definition land in LLD.
 - [services/webhooks/router.py](services/webhooks/router.py): the receive endpoint, after signature verification and tenant resolution, **stops calling `ingest()` inline**. Instead it writes raw → S3, publishes envelope → Kafka, returns 200. The provider-specific branches (Slack URL verification, Discord PING, GitHub lifecycle dispatch, GitHub selected_repositories filter) all stay — they happen before the S3 write.
 - [services/integrations/discord/gateway/](services/integrations/discord/gateway/) (the Gateway worker): becomes leader-elected via Redis (Redlock-style lease, 30 s TTL, refreshed every 10 s). Session state (`session_id`, `last_seq`, `resume_gateway_url`) is persisted to a new `gateway_session_state` table on every dispatched frame (single UPSERT, ~1 ms; tolerable overhead at the frame rate). On worker crash → restart, the new leader reads the persisted state and resumes.
 - [services/integrations/gmail/fetcher.py](services/integrations/gmail/fetcher.py): `drain_mailbox_history` becomes a Temporal activity called by a `GmailHistoryDrainWorkflow` (triggered by both the Pub/Sub push and the scheduled poller). Cursor advancement gets its own activity at last, satisfying the brief's "cursor advancement is a separate Temporal activity" mandate as a first-class property rather than an accidental ordering.
@@ -495,7 +505,7 @@ Envelopes are bounded (~1–4 KB); bodies are pointer-only. This keeps Kafka thr
 2. **Raw tier + Kafka shadow path**: webhook router writes to S3 + publishes to Kafka *in addition to* calling `ingest()` inline. Normalizer pool consumes and asserts observations match. Bug shakedown; no user-visible change.
 3. **Embedding worker**: deploy; flip writer-side to publish to `ingestion.embedding`; backfill existing `embedding_pending=TRUE` rows in a one-shot.
 4. **Discord Gateway leader-election + session persistence**: net-new behavior; deploy and verify a controlled k8s scale-up does not double-IDENTIFY.
-5. **Steady-state cutover**: webhook router stops calling `ingest()` inline; normalizer pool becomes the sole `ingest()` caller. This is the riskiest step; preceded by a 24-hour shadow-read period and a documented rollback plan.
+5. **Steady-state cutover**. Gated by: (a) a `tenant_id`-scoped feature flag `ingestion.kafka_path_enabled` stored in Postgres, default false; (b) an auto-trigger circuit breaker that flips the flag back to false for a tenant if normalizer consumer lag on `ingestion.raw` exceeds 60s for 5 consecutive minutes; (c) a staging dry-run with synthetic load completed and signed off; (d) a runbook covering the four scenarios (clean rollback, partial rollback per-tenant, draining behavior, double-ingestion risk). Detailed flag mechanism, circuit breaker activity, and runbook land in LLD.
 6. **Backfill rollout per source** (in order: Gmail → GitHub → Slack → Discord): per source, deploy planner + ShardFetchWorkflow + reconciler; enable for new installs first; opt-in backfill button for existing tenants.
 
 ---
