@@ -17,6 +17,7 @@ import pytest
 
 from lib.llm.provider import LLMConfig, LLMProvider
 from lib.shared.ids import uuid7
+from services.models.calibration import PROP_KIND_DEFAULTS
 from services.retrieval.primary import TriggerContext
 from services.think.post_commit import (
     process_batch,
@@ -188,7 +189,8 @@ async def test_self_reported_work_materializes_despite_prompt_injection(
         )
         recommendation = await conn.fetchrow(
             """
-            SELECT id, status, archive_reason, caused_act_change_id, proposition
+            SELECT id, status, archive_reason, caused_act_change_id,
+                   confidence, confidence_at_assertion, proposition
             FROM models
             WHERE tenant_id = $1 AND proposition_kind = 'recommendation'
             """,
@@ -222,6 +224,10 @@ async def test_self_reported_work_materializes_despite_prompt_injection(
     assert recommendation["status"] == "archived"
     assert recommendation["archive_reason"] == "acted_upon"
     assert recommendation["caused_act_change_id"] == commitment["id"]
+    assert recommendation["confidence_at_assertion"] == pytest.approx(0.7)
+    assert recommendation["confidence"] == pytest.approx(
+        0.7 * PROP_KIND_DEFAULTS["recommendation"]
+    )
     proposition = _jsonb(recommendation["proposition"])
     assert proposition["target_act_ref"] == {
         "type": "commitment",

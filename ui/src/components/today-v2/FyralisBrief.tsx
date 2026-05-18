@@ -26,15 +26,10 @@ export function FyralisBrief({ synthesis, whatChanged, handled }: Props) {
     <section className="tdv2-brief" data-testid="fyralis-brief">
       <div className="tdv2-brief__grid">
         <div className="tdv2-brief__synthesis-col">
-          <div className="tdv2-brief__badge" aria-hidden="true">
-            <SparkleIcon />
-          </div>
-          <div className="tdv2-brief__synthesis-text">
-            <p className="tdv2-brief__eyebrow">Fyralis brief</p>
-            {synthesis ? (
-              <p className="tdv2-brief__synthesis">{synthesis}</p>
-            ) : null}
-          </div>
+          <p className="tdv2-brief__eyebrow">Fyralis brief</p>
+          {synthesis ? (
+            <p className="tdv2-brief__synthesis">{synthesis}</p>
+          ) : null}
         </div>
         <div className="tdv2-brief__col">
           <h3 className="tdv2-brief__heading">What changed</h3>
@@ -141,31 +136,6 @@ function DirectionGlyph({ dir }: { dir: "up" | "down" | "neutral" }) {
         )}
       </svg>
     </span>
-  );
-}
-
-function SparkleIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 2v3" />
-      <path d="M9 13v3" />
-      <path d="M2 9h3" />
-      <path d="M13 9h3" />
-      <path d="M4.5 4.5L6 6" />
-      <path d="M12 12l1.5 1.5" />
-      <path d="M4.5 13.5L6 12" />
-      <path d="M12 6l1.5-1.5" />
-    </svg>
   );
 }
 

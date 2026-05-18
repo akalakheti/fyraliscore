@@ -133,7 +133,7 @@ class RecommendationProposition(_PropositionBase):
     proposed_change: dict[str, Any]
     expected_impact: float | None = None
     qualitative_impact: str | None = None
-    target_actor_id: str | None = None
+    target_actor_id: str | None = Field(...)
 
     @model_validator(mode="after")
     def _check_recommendation_shape(self) -> "RecommendationProposition":

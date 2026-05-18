@@ -205,6 +205,19 @@ async def tenant_cleanup(fresh_db: asyncpg.Pool, tenant: uuid.UUID):
         await conn.execute(
             "DELETE FROM relationship_maintenance_log WHERE tenant_id = $1", tenant,
         )
+        await conn.execute(
+            "DELETE FROM topo_dirty_queue WHERE tenant_id = $1", tenant,
+        )
+        await conn.execute(
+            "DELETE FROM topology_events WHERE tenant_id = $1", tenant,
+        )
+        await conn.execute(
+            "DELETE FROM model_neighborhood_membership WHERE tenant_id = $1",
+            tenant,
+        )
+        await conn.execute(
+            "DELETE FROM model_neighborhoods WHERE tenant_id = $1", tenant,
+        )
         # Core foundation tables
         await conn.execute(
             "DELETE FROM customer_commitments WHERE commitment_id IN "

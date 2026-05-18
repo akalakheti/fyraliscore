@@ -9901,122 +9901,157 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
 }
 
 /* ─── Collapsed (icon-rail) sidebar variant ───
- * Used in Today's Review Mode. The rail stays 72px wide so the page
- * reading column stays intact; on hover/focus the inner .fy-sidebar
- * expands to 260px and floats over the page content with a shadow,
- * never reflowing the layout. */
+ *
+ * Design intent: a 64px rail by default; on hover it slides out to
+ * 240px as an overlay so the page never reflows. The motion should
+ * feel like a single continuous gesture — the bar starts moving the
+ * instant the cursor lands, and everything inside (labels, dividers,
+ * status, profile) fades in alongside the width on the same timeline.
+ *
+ * Three things make the motion feel smooth:
+ *  (1) hover-in has zero delay; hover-out has a short delay so a
+ *      brief graze doesn't flap the bar open and shut.
+ *  (2) hidden content uses opacity + max-height (transitionable) —
+ *      never `display: none → revert`, which is not animatable and
+ *      causes content to pop in mid-slide.
+ *  (3) icons and brand stay anchored to a single x-position at all
+ *      widths. We never change `justify-content` mid-motion (it's
+ *      not animatable either) — labels expand into space to the
+ *      right of a fixed-position icon column.
+ */
 
 .fy-sidebar--collapsed {
   width: 64px;
-  padding: var(--space-5) var(--space-2);
-  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    padding 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 220ms ease;
+  padding: var(--space-5) 12px;
+  transition:
+    width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 280ms ease-out;
   z-index: 35;
-  /* When hover-expanded, this becomes an overlay; the outer flex item
-   * keeps its 64px so the page doesn't shift. */
   position: absolute;
   inset: 0 auto 0 0;
   height: 100vh;
+  overflow: hidden;
+  will-change: width;
+  /* Hover-out delay: when the cursor leaves, hold the expanded state
+   * briefly so a graze near the edge doesn't trigger a collapse. */
+  transition-delay: 140ms;
 }
 
-.fy-sidebar--collapsed .fy-sidebar__only-expanded {
-  display: none;
-}
-
-.fy-sidebar--collapsed .fy-sidebar__brand {
-  justify-content: center;
-  gap: 0;
-  padding: var(--space-1) 0 var(--space-5);
-}
-.fy-sidebar--collapsed .fy-sidebar__wordmark { display: none; }
-
-.fy-sidebar--collapsed .fy-sidebar__nav-item {
-  justify-content: center;
-  padding: 10px 0;
-  gap: 0;
-}
-.fy-sidebar--collapsed .fy-sidebar__nav-label {
-  /* Reserved space for the label so it can appear smoothly on expand. */
-  width: 0;
-  opacity: 0;
-  transition: width 180ms ease, opacity 180ms ease;
-}
-
-.fy-sidebar--collapsed .fy-sidebar__health {
-  background: transparent;
-  border: none;
-  padding: var(--space-2);
-  align-items: center;
-}
-.fy-sidebar--collapsed .fy-sidebar__health-row { justify-content: center; }
-
-.fy-sidebar--collapsed .fy-sidebar__user {
-  background: transparent;
-  border: none;
-  padding: var(--space-2);
-  justify-content: center;
-}
-
-/* Hover / focus expansion overlay. Delays match
- *   --sidebar-hover-delay: 180ms; --sidebar-collapse-delay: 300ms */
 .fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed,
 .fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed {
   width: 240px;
-  padding: var(--space-5) var(--space-4);
-  transition-delay: 180ms;
   box-shadow: 12px 0 32px rgba(7, 23, 19, 0.25);
+  /* Hover-in: zero delay. The bar starts moving on contact. */
+  transition-delay: 0ms;
 }
 
+/* All things that hide when collapsed share a fade-and-collapse
+ * pattern: opacity + max-height for block content, opacity + max-width
+ * for inline. This keeps the DOM intact so the layout above doesn't
+ * shift when content re-appears. */
+.fy-sidebar--collapsed .fy-sidebar__only-expanded {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    opacity 180ms ease-out,
+    max-height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 .fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__only-expanded,
 .fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__only-expanded {
-  display: revert;
+  opacity: 1;
+  max-height: 320px;
+  pointer-events: auto;
+  /* Stagger the fade slightly after the width starts so the labels
+   * appear inside the bar that's already widening, not floating in
+   * empty space. */
+  transition-delay: 80ms;
 }
 
-.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__brand,
-.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__brand {
+/* Nav items: anchor the icon to a fixed left padding so it sits in
+ * the same x-position whether collapsed or expanded. The label lives
+ * to the right, hidden via opacity + max-width when collapsed. */
+.fy-sidebar--collapsed .fy-sidebar__nav-item {
+  padding: 10px 16px;
+  gap: 16px;
   justify-content: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-1) var(--space-2) var(--space-5);
+  white-space: nowrap;
 }
-.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__wordmark,
-.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__wordmark {
-  display: revert;
-}
-.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__nav-item,
-.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__nav-item {
-  justify-content: flex-start;
-  padding: 10px var(--space-3);
-  gap: var(--space-3);
+.fy-sidebar--collapsed .fy-sidebar__nav-label {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  transition:
+    opacity 180ms ease-out,
+    max-width 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__nav-label,
 .fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__nav-label {
-  width: auto;
   opacity: 1;
-  transition-delay: 200ms;
+  max-width: 180px;
+  transition-delay: 80ms;
 }
+
+/* Brand: same anchor strategy as nav items. F mark stays put; the
+ * wordmark fades in beside it. */
+.fy-sidebar--collapsed .fy-sidebar__brand {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: var(--space-1) 16px var(--space-5);
+  white-space: nowrap;
+}
+.fy-sidebar--collapsed .fy-sidebar__wordmark {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  transition:
+    opacity 180ms ease-out,
+    max-width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__wordmark,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__wordmark {
+  opacity: 1;
+  max-width: 200px;
+  transition-delay: 80ms;
+}
+
+/* Health + user cards: background/border fade in when expanded;
+ * stay flush left so the avatar and dot don't shift x-position. */
+.fy-sidebar--collapsed .fy-sidebar__health,
+.fy-sidebar--collapsed .fy-sidebar__user {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: var(--space-2) 12px;
+  justify-content: flex-start;
+  transition:
+    background 240ms ease-out,
+    border-color 240ms ease-out,
+    padding 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fy-sidebar--collapsed .fy-sidebar__health-row { justify-content: flex-start; }
+
 .fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__health,
 .fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__health {
   background: rgba(19, 38, 35, 0.55);
-  border: 1px solid rgba(221, 215, 203, 0.08);
+  border-color: rgba(221, 215, 203, 0.08);
   padding: var(--space-3);
-  align-items: stretch;
-}
-.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__health-row,
-.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__health-row {
-  justify-content: flex-start;
+  transition-delay: 60ms;
 }
 .fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__user,
 .fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__user {
   background: rgba(7, 23, 19, 0.6);
-  border: 1px solid rgba(221, 215, 203, 0.08);
+  border-color: rgba(221, 215, 203, 0.08);
   padding: var(--space-3);
-  justify-content: flex-start;
+  transition-delay: 60ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fy-shell__sidebar,
   .fy-sidebar--collapsed,
+  .fy-sidebar--collapsed *,
   .fy-sidebar--collapsed .fy-sidebar__nav-label {
     transition: none !important;
   }
