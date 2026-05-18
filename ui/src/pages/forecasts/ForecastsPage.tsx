@@ -122,7 +122,8 @@ export default function ForecastsPage() {
   return (
     <div className="fc-page" data-mode={mode}>
       <AppShell
-        sidebar={<Sidebar activeRoute="forecasts" />}
+        sidebarMode="collapsed"
+        sidebar={<Sidebar activeRoute="forecasts" mode="collapsed" />}
         main={
           <div className="fc-main">
             <ForecastsHeader

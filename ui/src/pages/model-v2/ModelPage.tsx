@@ -361,7 +361,8 @@ export default function ModelPage() {
   return (
     <>
       <AppShell
-        sidebar={<Sidebar activeRoute="model" />}
+        sidebarMode="collapsed"
+        sidebar={<Sidebar activeRoute="model" mode="collapsed" />}
         main={
           <div className="fm-page" data-testid="model-page">
             <ArrowDefs />

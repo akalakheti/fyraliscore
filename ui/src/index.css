@@ -9605,14 +9605,16 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
 .fy-shell__sidebar {
   flex: 0 0 264px;
   width: 264px;
-  min-height: 100vh;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
+  /* Stretch with the flex parent so the dark-green background extends
+   * the full page height (not capped at 100vh as previously). The
+   * inner .fy-sidebar handles sticky pinning to keep nav in view. */
+  align-self: stretch;
   background: var(--bg-sidebar);
   color: var(--text-on-dark);
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 30;
 }
 
 /* Collapsed (icon rail) variant: the flex item stays 64px so the page
@@ -9662,7 +9664,11 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
 /* ─── Sidebar ─── */
 
 .fy-sidebar {
-  position: relative;
+  /* Sticky inner nav: the outer aside provides the full-height
+   * background; this inner stays pinned to the viewport top as the
+   * page scrolls. */
+  position: sticky;
+  top: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;

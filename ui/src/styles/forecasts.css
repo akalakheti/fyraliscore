@@ -21,9 +21,6 @@
   min-height: 100vh;
   color: var(--text-primary);
   font-family: var(--font-sans-v2);
-  /* Page itself must never horizontally scroll. Child grids handle their
-   * own shrinking via min-width: 0 / minmax(0, ...) below. */
-  overflow-x: hidden;
 }
 
 .fc-main {
