@@ -312,6 +312,22 @@ export default function TodayBriefing() {
                       applying={applyingId === selectedDelta.id}
                       position={positionOf(selectedDelta.id)}
                       onOpenEvidence={() => void openEvidence(selectedDelta)}
+                      onPrev={() => {
+                        const idx = orderedQueue.findIndex(
+                          (d) => d.id === selectedDelta.id,
+                        );
+                        if (idx > 0) {
+                          setSelected(orderedQueue[idx - 1].id, { replace: true });
+                        }
+                      }}
+                      onNext={() => {
+                        const idx = orderedQueue.findIndex(
+                          (d) => d.id === selectedDelta.id,
+                        );
+                        if (idx >= 0 && idx + 1 < orderedQueue.length) {
+                          setSelected(orderedQueue[idx + 1].id, { replace: true });
+                        }
+                      }}
                     />
                     <ReviewActionBar
                       delta={selectedDelta}

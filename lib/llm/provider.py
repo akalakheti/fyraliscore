@@ -968,7 +968,10 @@ class DeepSeekProvider(OpenAIProvider):
         max_tokens: int,
     ) -> str:
         strict_schema = _strict_schema_for(schema)
-        if strict_schema is None:
+        if (
+            strict_schema is None
+            or not _deepseek_supports_strict_tool_calling(self.config.model)
+        ):
             return await super()._structured_raw(
                 system=system, user=user, schema=schema,
                 temperature=temperature, max_tokens=max_tokens,
@@ -1061,6 +1064,20 @@ def _repair_deepseek_strict_json(text: str) -> str:
     """
     import re
     return re.sub(r'"([A-Za-z_][A-Za-z0-9_]*):\s', r'"\1": ', text)
+
+
+def _deepseek_supports_strict_tool_calling(model_name: str | None) -> bool:
+    """DeepSeek reasoner rejects tool_choice/tool-calling requests.
+
+    Keep strict tool-calling for chat-class models where it constrains
+    RawDiff shape server-side, but route reasoner-class models through
+    JSON-mode structured output instead. This lets operators choose
+    reasoner for deeper cognition without tripping a provider-level
+    400 before Think ever reaches validation.
+    """
+    if not model_name:
+        return True
+    return "reasoner" not in model_name.lower()
 
 
 def _strict_schema_for(schema: type[BaseModel]) -> dict | None:

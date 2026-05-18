@@ -63,7 +63,7 @@ export function AskFyralisStrip({ delta }: Props) {
       data-testid={`ask-strip-${delta.id}`}
       aria-label="Ask Fyralis about this proposed change"
     >
-      <h3 className="tdv2-ask__heading">Ask Fyralis about this change</h3>
+      <h3 className="tdv2-ask__heading">Ask Fyralis</h3>
       <div className="tdv2-ask__chips">
         {suggestions.map((s) => (
           <button

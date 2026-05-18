@@ -64,6 +64,8 @@ function relativeDue(iso?: string | null): string | null {
 export function ReviewQueueRail({ items, selectedId, handled, onSelect }: Props) {
   const primary = items[0];
   const others = items.slice(1);
+  const selectedIdx = items.findIndex((d) => d.id === selectedId);
+  const position = selectedIdx >= 0 ? selectedIdx + 1 : 1;
 
   return (
     <aside
@@ -71,11 +73,17 @@ export function ReviewQueueRail({ items, selectedId, handled, onSelect }: Props)
       data-testid="review-rail"
       aria-label="Review queue"
     >
+      <header className="tdv2-rail__heading">
+        <span className="tdv2-rail__heading-label">Review queue</span>
+        <span className="tdv2-rail__heading-count">
+          {position} of {items.length}
+        </span>
+      </header>
+
       {primary ? (
         <div className="tdv2-rail__group">
           <header className="tdv2-rail__group-head">
             <span className="tdv2-rail__group-label">Primary judgment</span>
-            <span className="tdv2-rail__group-count">1 of {items.length}</span>
           </header>
           <PrimaryRow
             delta={primary}
@@ -104,9 +112,6 @@ export function ReviewQueueRail({ items, selectedId, handled, onSelect }: Props)
               </li>
             ))}
           </ul>
-          <a className="tdv2-rail__see-all" href="#all-items">
-            View all {items.length} items →
-          </a>
         </div>
       ) : null}
 
@@ -118,24 +123,26 @@ export function ReviewQueueRail({ items, selectedId, handled, onSelect }: Props)
           <HandledStat
             icon={<UsersGlyph />}
             value={handled.signalsAbsorbed}
-            label="Signals absorbed"
+            label="signals absorbed"
           />
-          <HandledStat
-            icon={<UpdatesGlyph />}
-            value={handled.modelUpdatesApplied}
-            label="Model updates applied"
-          />
-          <HandledStat
-            icon={<MonitorGlyph />}
-            value={handled.itemsUnderMonitoring}
-            label="Items under monitoring"
-          />
-          <HandledStat
-            icon={<CheckGlyph />}
-            label="All quiet"
-            sub="No new exposures"
-          />
+          {handled.modelUpdatesApplied > 0 ? (
+            <HandledStat
+              icon={<UpdatesGlyph />}
+              value={handled.modelUpdatesApplied}
+              label="model updates applied"
+            />
+          ) : null}
+          {handled.itemsUnderMonitoring > 0 ? (
+            <HandledStat
+              icon={<MonitorGlyph />}
+              value={handled.itemsUnderMonitoring}
+              label="items under monitoring"
+            />
+          ) : null}
         </ul>
+        <a className="tdv2-rail__see-all" href="/ledger">
+          See all activity →
+        </a>
       </div>
     </aside>
   );

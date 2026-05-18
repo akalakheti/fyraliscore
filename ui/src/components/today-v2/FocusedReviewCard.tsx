@@ -42,6 +42,8 @@ interface Props {
   position?: { index: number; total: number } | null;
   applying?: boolean;
   onOpenEvidence: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
 const CATEGORY_LABELS: Record<ModelCategoryKey, string> = {
@@ -101,14 +103,23 @@ function confLabel(
   return { pct: `${pct}% confidence`, band };
 }
 
-export function FocusedReviewCard({ delta, position, onOpenEvidence }: Props) {
+export function FocusedReviewCard({
+  delta,
+  position,
+  onOpenEvidence,
+  onPrev,
+  onNext,
+}: Props) {
   const badge = STATUS_BADGES[delta.status];
   const conf = confLabel(delta.confidence);
+  const canPrev = position ? position.index > 0 : false;
+  const canNext = position ? position.index + 1 < position.total : false;
 
   return (
     <article
       className={`tdv2-review tdv2-review--${badge.tone}`}
       data-testid={`focused-review-${delta.id}`}
+      data-status={delta.status}
       data-state={badge.tone}
       id={`focused-${delta.id}`}
       aria-label={`Reviewing proposed change: ${delta.title}. ${badge.label}.`}
@@ -117,11 +128,23 @@ export function FocusedReviewCard({ delta, position, onOpenEvidence }: Props) {
         {position ? (
           <span className="tdv2-review__position">
             Reviewing <strong>{position.index + 1} of {position.total}</strong>
-            <span className="tdv2-review__nav" aria-hidden="true">
-              <button type="button" className="tdv2-review__nav-btn" disabled>
+            <span className="tdv2-review__nav">
+              <button
+                type="button"
+                className="tdv2-review__nav-btn"
+                disabled={!canPrev || !onPrev}
+                onClick={onPrev}
+                aria-label="Previous proposed change"
+              >
                 <ChevLeft />
               </button>
-              <button type="button" className="tdv2-review__nav-btn" disabled>
+              <button
+                type="button"
+                className="tdv2-review__nav-btn"
+                disabled={!canNext || !onNext}
+                onClick={onNext}
+                aria-label="Next proposed change"
+              >
                 <ChevRight />
               </button>
             </span>
@@ -129,16 +152,13 @@ export function FocusedReviewCard({ delta, position, onOpenEvidence }: Props) {
         ) : (
           <span />
         )}
-        <span className="tdv2-review__util-right">
-          <span className={`tdv2-badge tdv2-badge--${badge.tone}`}>
-            <span className="tdv2-badge__dot" aria-hidden="true" />
-            {badge.label}
-          </span>
+        <span className={`tdv2-status-chip tdv2-status-chip--${badge.tone}`}>
+          {badge.label}
         </span>
       </div>
 
       <header className="tdv2-review__header">
-        <span className="tdv2-review__kind">PROPOSED CHANGE</span>
+        <span className="tdv2-review__kind">Proposed change</span>
         <h2
           className="tdv2-review__title"
           tabIndex={-1}
@@ -148,12 +168,12 @@ export function FocusedReviewCard({ delta, position, onOpenEvidence }: Props) {
         {delta.summaryLine ? (
           <p className="tdv2-review__subtitle">{delta.summaryLine}</p>
         ) : null}
-        {conf ? (
-          <span className={`tdv2-confidence tdv2-confidence--${conf.band}`}>
-            {conf.pct}
-          </span>
-        ) : null}
-        <div className="tdv2-review__meta">
+        <div className="tdv2-review__metaline">
+          {conf ? (
+            <span className={`tdv2-confidence tdv2-confidence--${conf.band}`}>
+              {conf.pct}
+            </span>
+          ) : null}
           <span className="tdv2-review__meta-item">
             From {CATEGORY_LABELS[delta.sourceCategory] ?? delta.sourceCategory}
           </span>
@@ -244,20 +264,19 @@ function CurrentProposedTable({ delta }: { delta: DecisionDelta }) {
   if (rows.length === 0) return null;
   return (
     <section className="tdv2-review__diff" data-testid="change-diff">
-      <h3 className="tdv2-section__heading">
-        Current → proposed
-      </h3>
+      <h3 className="tdv2-section__heading">Current → proposed</h3>
       <div className="tdv2-diff" role="table">
         <div className="tdv2-diff__head" role="row">
-          <span role="columnheader" />
           <span role="columnheader" className="tdv2-diff__head-cell">Current</span>
-          <span role="columnheader" />
+          <span role="columnheader" aria-hidden="true" />
           <span role="columnheader" className="tdv2-diff__head-cell">Proposed</span>
         </div>
         {rows.map((r) => (
           <div key={r.key} className="tdv2-diff__row" role="row">
-            <span role="cell" className="tdv2-diff__label">{r.label}</span>
-            <span role="cell" className="tdv2-diff__from">{r.from || "—"}</span>
+            <span role="cell" className="tdv2-diff__from">
+              <span className="tdv2-diff__field">{r.label}:</span>{" "}
+              <span className="tdv2-diff__value">{r.from || "—"}</span>
+            </span>
             <span role="cell" className="tdv2-diff__arrow" aria-hidden="true">→</span>
             <span
               role="cell"
@@ -397,7 +416,7 @@ function WhatHappensIfAccepted({ items }: { items: ImpactItem[] }) {
   if (items.length === 0) return null;
   return (
     <section className="tdv2-section">
-      <h3 className="tdv2-section__heading">What happens if accepted</h3>
+      <h3 className="tdv2-section__heading">If accepted</h3>
       <ol className="tdv2-steps">
         {items.slice(0, 4).map((i, idx) => (
           <li key={i.id} className="tdv2-step">

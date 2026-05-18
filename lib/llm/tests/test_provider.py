@@ -66,6 +66,7 @@ def _valid_payload() -> str:
 
 def test_config_from_env_defaults(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.setenv("LLM_API_KEY", "k")
     cfg = LLMConfig.from_env()
     assert cfg.provider == "anthropic"
@@ -102,6 +103,15 @@ def test_build_provider_openai(monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "k")
     provider = build_provider()
     assert isinstance(provider, OpenAIProvider)
+
+
+def test_deepseek_reasoner_uses_json_mode_not_strict_tools(monkeypatch):
+    """DeepSeek reasoner rejects tool_choice; chat models keep strict tools."""
+    from lib.llm.provider import _deepseek_supports_strict_tool_calling
+
+    assert not _deepseek_supports_strict_tool_calling("deepseek-reasoner")
+    assert not _deepseek_supports_strict_tool_calling("deepseek-reasoner-v2")
+    assert _deepseek_supports_strict_tool_calling("deepseek-chat")
 
 
 # =====================================================================
