@@ -141,6 +141,91 @@ removed from that file.
   correct). The M3 prompt will be updated separately before M3.2's
   next iteration so the discrepancy is closed at the source.
 
+### A6 — Discord Gateway shadow-write Kafka flush window (M4.3 finding)
+
+- **Status:** Open. Surface for design review; no quick fix needed.
+- **LLD section:** §5.4 (the Discord Gateway worker's frame-by-frame
+  shadow path) + §1.5 (gateway_session_state save-after-handle
+  contract).
+- **Implementation surface:**
+  [services/integrations/discord/gateway/dispatch.py:226-234](../../services/integrations/discord/gateway/dispatch.py#L226-L234)
+  (the `shadow_write_raw` call in `_maybe_shadow_write_gateway`)
+  and [services/ingestion/kafka/producer.py:116-149](../../services/ingestion/kafka/producer.py#L116-L149)
+  (`IdempotentProducer.produce` returns on local-enqueue, not
+  broker-ack).
+- **What we found:** M4.3's load-bearing
+  `test_no_frames_lost_across_sigkill` initially failed: only 1 of
+  3 expected frames appeared on `ingestion.raw`. Root cause —
+  `IdempotentProducer.produce()` returns when the message is in
+  librdkafka's local queue, NOT when the broker has acked. The
+  configured `linger_ms=5` + `acks=all` mean a 5ms window exists
+  where SIGKILL drops in-flight messages. The save-after-handle
+  ordering then persists `last_seq=N` to Postgres while the
+  Kafka message for seq N was never delivered. Next worker
+  RESUMEs past N — Discord never re-delivers — silent N1 breach.
+- **What we did for the test:** the M4.3 subprocess entrypoint
+  inserts `await kafka_producer.flush(timeout_seconds=5.0)` between
+  `shadow_write_raw` and `save_session_state`. This makes the
+  shadow-write boundary durable and the test passes.
+- **What production looks like today:** the M2 production webhook
+  router + M2.2 gateway dispatch call `shadow_write_raw` WITHOUT a
+  flush. The design assumption is "the producer is idempotent +
+  acks=all, so a producer-side restart re-publishes from in-memory
+  queue." Under SIGKILL the queue is lost; under SIGTERM the
+  worker has time to call `producer.stop()` which flushes.
+- **Trade-off:** per-frame flush adds ~5-50ms latency (broker round
+  trip). For the M5 cutover scenario where the inline path is the
+  source of truth this is fine. For M6+ when the shadow path
+  becomes the only path AND Discord Gateway is the surface, a
+  per-frame flush would cap throughput at ~20 frames/sec (single
+  shard, sequential dispatch).
+- **Three options for resolution (the design discussion that
+  must happen before M5):**
+    1. **Per-frame flush.** Insert
+       `await kafka_producer.flush(timeout=2)` between
+       `shadow_write_raw()` and `save_session_state()` in the gateway
+       dispatch path. The save then only persists `last_seq=N` once
+       the broker has acked frame N. Strongest N1 guarantee;
+       per-frame latency bounded by broker RTT (~5-50ms depending on
+       broker latency + linger). Throughput ceiling per shard is
+       1/RTT — adequate for Discord MESSAGE_CREATE volumes on a
+       typical tenant but a hard cap if the gateway becomes the
+       sole high-volume source.
+    2. **Batched flush every N frames or T milliseconds.** Save
+       state every frame, flush every 10 frames or 100ms. Bounds
+       the loss window (at most N frames or T ms of frames lost
+       under SIGKILL) without paying broker RTT per frame.
+       **Violates N1 by design**: "lost up to N frames" is not
+       "never lose data" under any reading. Listed here for
+       completeness; should be rejected unless N1 is explicitly
+       softened to "lose at most ε frames per crash."
+    3. **Save inside the producer's delivery-report callback.**
+       confluent-kafka's idempotent producer delivers a callback
+       when the broker has acked a message. Move
+       `save_session_state(last_seq=N)` into that callback so the
+       save fires only after frame N is durable on Kafka.
+       Decouples the WS receive loop from broker RTT (the next
+       frame's `shadow_write` runs in parallel with the previous
+       frame's save). Strict N1 preserved. Highest implementation
+       complexity: out-of-order callback completion needs ordering
+       discipline (a callback for seq=5 must not race ahead of a
+       callback for seq=4 when persisting `last_seq`); the save
+       races with the next frame's produce; bookkeeping for the
+       in-flight set is nontrivial.
+- **Read (not a decision; a starting point for the design call):**
+  Option 3 is structurally correct and is what the M4.2
+  "save-after-handle" contract was written to express. Option 1 is
+  the conservative fallback if Option 3's complexity is judged
+  too high for the throughput regime. Option 2 should be rejected
+  unless N1 is renegotiated.
+- **LLD edit pending:** §5.4 needs a paragraph on Kafka publish
+  durability semantics + the gap between produce-return and
+  broker-ack. The choice between options (1)/(2)/(3) above is a
+  pre-M5 design decision (M5 makes the gateway worker the sole
+  Discord ingestion path; before that flip happens, the production
+  code path must be durable against broker-not-yet-acked frames).
+  Tracked as M5 pre-cutover gate condition (8).
+
 ### A5 — Failure-kind-specific replay anchors
 
 - **Status:** Open (M3.4 documents the LLD edit).
