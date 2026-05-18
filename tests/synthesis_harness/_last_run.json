@@ -1,673 +1,161 @@
 [
   {
-    "stage": "adversarial.linguistic",
-    "name": "sarcasm_inverted_polarity",
-    "intent": "Sarcastic 'they love us'-style phrasing with a negative event must produce a concern, not a positive-sentiment state",
+    "stage": "retrieval",
+    "name": "pathway_A_actor_scope",
+    "intent": "T1 with scope_actor seeds pathway A and surfaces actor-scoped Models",
     "passed": true,
-    "elapsed_ms": 8997,
+    "elapsed_ms": 58,
     "diff": "",
     "error": null,
     "actual": {
-      "obs_id": "019e3a48-2613-7000-850c-7af40cef2778",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9040,
-        "output_tokens": 562,
-        "cost_usd": 0.0030590000000000005,
-        "latency_ms": 8910
+      "model_ids": [
+        "019e3a64-c108-7000-8c26-481267f9276d"
+      ],
+      "scores": {
+        "019e3a64-c108-7000-8c26-481267f9276d": 0.03032786885245902
       },
-      "models": [
-        {
-          "id": "019e3a48-4910-7000-8a42-d53caeac7765",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"ACME engagement\", \"nature\": \"ACME has not replied to any emails for three weeks, indicating disengagement ahead of a QBR scheduled next month\", \"raised_by\": \"019e3a48-2610-7000-a4cf-d01cb1fed153\"}",
-          "natural": "ACME has gone silent for three weeks with no email replies, raising concern about their engagement level ahead of the upcoming QBR.",
-          "confidence": 0.6900000000000001,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": "{\"kind\": \"observation_pattern\", \"pattern\": \"ACME replies to an email thread or schedules a pre-QBR call\", \"within_window\": \"P30D\"}"
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "concern"
-      ],
-      "model_naturals": [
-        "ACME has gone silent for three weeks with no email replies, raising concern about their engagement level ahead of the upcoming QBR."
+      "pathways_run": [
+        "A",
+        "B",
+        "C"
       ]
     },
-    "expected": {}
+    "expected": {
+      "in_scope": "019e3a64-c108-7000-8c26-481267f9276d",
+      "out_scope": "019e3a64-c11a-7000-8940-6c36dad48478"
+    }
   },
   {
-    "stage": "adversarial.linguistic",
-    "name": "double_negation_does_not_flip_polarity",
-    "intent": "Double negation 'don't think we shouldn't ship' must NOT extract as a 'we will not ship' claim",
+    "stage": "retrieval",
+    "name": "pathway_B_semantic_top1",
+    "intent": "Pathway B ranks the cosine-nearest Model first",
     "passed": true,
-    "elapsed_ms": 6914,
+    "elapsed_ms": 56,
     "diff": "",
     "error": null,
     "actual": {
-      "obs_id": "019e3a48-2614-7000-9142-f6dfbc877725",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9055,
-        "output_tokens": 460,
-        "cost_usd": 0.00295085,
-        "latency_ms": 6232
-      },
-      "models": [
-        {
-          "id": "019e3a48-40e9-7000-a30e-b9b67abf978e",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"v2 export pipeline\", \"assertion\": \"Eng leadership has identified shipping by Q3 as a priority\"}",
-          "natural": "Engineering leadership has made the v2 export pipeline a priority for Q3 delivery.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "state"
-      ],
-      "model_naturals": [
-        "Engineering leadership has made the v2 export pipeline a priority for Q3 delivery."
+      "model_ids": [
+        "019e3a64-c107-7000-9b8f-8d00e484b658",
+        "019e3a64-c11a-7001-abf5-7243ea0bc17a"
       ]
     },
-    "expected": {}
+    "expected": {
+      "first_must_be": "019e3a64-c107-7000-9b8f-8d00e484b658"
+    }
   },
   {
-    "stage": "adversarial.linguistic",
-    "name": "conditional_commitment_handling",
-    "intent": "A conditional commitment ('if X then we ship') should NOT be stored as an unconditional commitment Node",
+    "stage": "retrieval",
+    "name": "pathway_C_temporal_window",
+    "intent": "Pathway C surfaces in-window obs/models and excludes out-of-window",
     "passed": true,
-    "elapsed_ms": 6915,
+    "elapsed_ms": 77,
     "diff": "",
     "error": null,
     "actual": {
-      "obs_id": "019e3a48-4119-7000-a1e1-e0182c7413b0",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9033,
-        "output_tokens": 526,
-        "cost_usd": 0.00301751,
-        "latency_ms": 6839
+      "model_ids": [
+        "019e3a64-c111-7000-9cd6-35ed087f6cc0",
+        "019e3a64-c126-7000-9c4f-4bc4190f1249"
+      ],
+      "obs_ids": [
+        "019e3a64-c136-7000-9c80-7566111be915"
+      ],
+      "scores": {
+        "019e3a64-c111-7000-9cd6-35ed087f6cc0": 0.03032786885245902,
+        "019e3a64-c126-7000-9c4f-4bc4190f1249": 0.027419354838709678
       },
-      "models": [
+      "pathway_results": [
         {
-          "id": "019e3a48-5bf4-7000-a198-4789285df344",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"Stripe integration\", \"assertion\": \"conditional on Pelago renewal \u2014 will ship by Q3 if Pelago renews by end of August, otherwise deprioritized\"}",
-          "natural": "The Stripe integration is contingent on Pelago's contract renewal: ship by Q3 if Pelago renews by end of August, otherwise deprioritize.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "state"
-      ],
-      "model_naturals": [
-        "The Stripe integration is contingent on Pelago's contract renewal: ship by Q3 if Pelago renews by end of August, otherwise deprioritize."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "tense_ambiguity_present_continuous",
-    "intent": "'We're shipping X' is ambiguous: is it shipping now, or as part of normal work, or future-tense?",
-    "passed": true,
-    "elapsed_ms": 15276,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-493e-7000-9b25-80762041eabb",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 2,
-        "input_tokens": 18013,
-        "output_tokens": 1284,
-        "cost_usd": 0.00627591,
-        "latency_ms": 15200
-      },
-      "models": [
-        {
-          "id": "019e3a48-84c0-7000-ace3-fc8afa513d22",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"migration tool\", \"assertion\": \"is being shipped, status is good, owned by Trent\"}",
-          "natural": "The migration tool is being shipped with good status and Trent owns it.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "state"
-      ],
-      "model_naturals": [
-        "The migration tool is being shipped with good status and Trent owns it."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "code_switched_english_spanish",
-    "intent": "Code-switched signal must extract critical facts (deadline, escalation threat) regardless of language interleave",
-    "passed": true,
-    "elapsed_ms": 9124,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-5c1d-7000-92e3-da17bc158756",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9044,
-        "output_tokens": 587,
-        "cost_usd": 0.00308758,
-        "latency_ms": 9033
-      },
-      "models": [
-        {
-          "id": "019e3a48-7f8c-7000-95ab-603ec860b253",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"ACME customer relationship\", \"nature\": \"ACME is extremely upset about latency and has demanded a fix by Friday or they will escalate to legal \u2014 this is an urgent churn and legal-risk signal.\", \"raised_by\": \"019e3a48-5c16-7000-8b9d-7ea7ebfe8e57\"}",
-          "natural": "ACME is threatening escalation to legal over latency, demanding a fix by Friday.",
-          "confidence": 0.782,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": "{\"kind\": \"observation_pattern\", \"pattern\": \"ACME communicates satisfaction or retracts the escalation threat regarding latency\", \"within_window\": \"P7D\"}"
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "concern"
-      ],
-      "model_naturals": [
-        "ACME is threatening escalation to legal over latency, demanding a fix by Friday."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "typos_and_autocorrect_failures",
-    "intent": "Typos ('comitted', 'dadhboard', 'migartion') must not prevent extraction entirely",
-    "passed": true,
-    "elapsed_ms": 10541,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-7fc2-7000-90aa-deba9e3d245a",
-      "status": "success",
-      "ops_applied_count": 3,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9041,
-        "output_tokens": 876,
-        "cost_usd": 0.0034046700000000003,
-        "latency_ms": 10452
-      },
-      "models": [
-        {
-          "id": "019e3a48-a8bf-7000-9a41-6d4fd9cbe840",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"Sarah\", \"assertion\": \"Sarah stated the dashboard cannot be delivered by Q3 because the auth migration is blocked\"}",
-          "natural": "Sarah said the dashboard Q3 commitment cannot be met because the auth migration is blocked.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
+          "name": "A",
+          "model_ids": [
+            "019e3a64-c111-7000-9cd6-35ed087f6cc0",
+            "019e3a64-c126-7000-9c4f-4bc4190f1249"
+          ]
         },
         {
-          "id": "019e3a48-a8cd-7000-8c32-d7e99d734645",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"auth migration\", \"assertion\": \"The auth migration is blocked, creating a dependency risk for the dashboard delivery\"}",
-          "natural": "The auth migration is blocked, which is blocking the dashboard delivery.",
-          "confidence": 0.55,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
+          "name": "B",
+          "model_ids": [
+            "019e3a64-c111-7000-9cd6-35ed087f6cc0",
+            "019e3a64-c126-7000-9c4f-4bc4190f1249"
+          ]
         },
         {
-          "id": "019e3a48-a8d1-7000-aa81-2b2ba3988867",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"dashboard Q3 delivery commitment\", \"nature\": \"The dashboard may not ship by Q3 because the auth migration is blocked, creating a delivery risk\", \"raised_by\": \"Sarah\"}",
-          "natural": "There is a concern that the dashboard will not ship by Q3 due to the blocked auth migration.",
-          "confidence": 0.5060000000000001,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": null
+          "name": "C",
+          "model_ids": [
+            "019e3a64-c111-7000-9cd6-35ed087f6cc0"
+          ]
         }
-      ],
-      "model_count": 3,
-      "model_kinds": [
-        "state",
-        "state",
-        "concern"
-      ],
-      "model_naturals": [
-        "Sarah said the dashboard Q3 commitment cannot be met because the auth migration is blocked.",
-        "The auth migration is blocked, which is blocking the dashboard delivery.",
-        "There is a concern that the dashboard will not ship by Q3 due to the blocked auth migration."
       ]
     },
-    "expected": {}
+    "expected": {
+      "must_include_obs": [
+        "019e3a64-c136-7000-9c80-7566111be915"
+      ],
+      "must_include_model": "019e3a64-c111-7000-9cd6-35ed087f6cc0",
+      "out_win": "019e3a64-c126-7000-9c4f-4bc4190f1249"
+    }
   },
   {
-    "stage": "adversarial.linguistic",
-    "name": "quoted_speech_attribution",
-    "intent": "Engine must distinguish 'John said X' from a first-person claim of X by the speaker",
+    "stage": "retrieval",
+    "name": "pathway_D_pattern_signature",
+    "intent": "T4 with seed_signature returns matching pattern and its instances",
     "passed": true,
-    "elapsed_ms": 9638,
+    "elapsed_ms": 70,
     "diff": "",
     "error": null,
     "actual": {
-      "obs_id": "019e3a48-84ea-7000-9e8c-b6880ee3e39c",
-      "status": "success",
-      "ops_applied_count": 2,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9057,
-        "output_tokens": 738,
-        "cost_usd": 0.0032571900000000005,
-        "latency_ms": 9559
-      },
-      "models": [
-        {
-          "id": "019e3a48-aa67-7000-916e-86217f878d5f",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"John (sales)\", \"assertion\": \"John stated the ACME pilot is being killed because ACME won't renew\"}",
-          "natural": "John from sales said the ACME pilot is being killed because ACME isn't going to renew anyway.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        },
-        {
-          "id": "019e3a48-aa75-7000-b1ce-628feff969ae",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"John's claim about killing the ACME pilot\", \"nature\": \"The reporter doubts John's statement should be treated as final, noting John has been negative all week \u2014 the claim may reflect mood rather than actual business decision\", \"raised_by\": \"reporter (anonymous)\"}",
-          "natural": "The reporter is uncertain whether John's statement about killing the ACME pilot reflects a real decision or just his negative mood this week.",
-          "confidence": 0.55,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 2,
-      "model_kinds": [
-        "state",
-        "concern"
-      ],
-      "model_naturals": [
-        "John from sales said the ACME pilot is being killed because ACME isn't going to renew anyway.",
-        "The reporter is uncertain whether John's statement about killing the ACME pilot reflects a real decision or just his negative mood this week."
+      "model_ids": [
+        "019e3a64-c110-7000-96a3-2f33a2ec97ad",
+        "019e3a64-c123-7000-a7ee-7fb1c240f1e7"
       ]
     },
-    "expected": {}
+    "expected": {
+      "must_include": [
+        "019e3a64-c110-7000-96a3-2f33a2ec97ad",
+        "019e3a64-c123-7000-a7ee-7fb1c240f1e7"
+      ],
+      "must_exclude": [
+        "019e3a64-c131-7000-a649-91a9ba4709ee"
+      ]
+    }
   },
   {
-    "stage": "adversarial.linguistic",
-    "name": "reported_decision_secondhand",
-    "intent": "Secondhand reported decision must NOT produce a high-confidence Decision/state Node",
+    "stage": "retrieval",
+    "name": "scoped_fusion_multipathway",
+    "intent": "Scoped fusion: A\u2229B model wins and semantic-only out-of-scope decoy is excluded",
     "passed": true,
-    "elapsed_ms": 6011,
+    "elapsed_ms": 70,
     "diff": "",
     "error": null,
     "actual": {
-      "obs_id": "019e3a48-a8f1-7000-9b42-6a5458f9c107",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9051,
-        "output_tokens": 459,
-        "cost_usd": 0.00294867,
-        "latency_ms": 5928
-      },
-      "models": [
-        {
-          "id": "019e3a48-c048-7000-a612-a25377300fc0",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"Leadership\", \"assertion\": \"allegedly decided to drop the Beta Corp account last Thursday, per secondhand report via Mike from Sarah's standup\"}",
-          "natural": "Leadership reportedly decided to drop the Beta Corp account last Thursday, though this is unconfirmed secondhand information.",
-          "confidence": 0.33249999999999996,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
+      "ids": [
+        "019e3a64-c112-7001-b333-36e93c848dae"
       ],
-      "model_count": 1,
-      "model_kinds": [
-        "state"
-      ],
-      "model_naturals": [
-        "Leadership reportedly decided to drop the Beta Corp account last Thursday, though this is unconfirmed secondhand information."
-      ]
+      "scores": {
+        "019e3a64-c112-7001-b333-36e93c848dae": 0.03032786885245902
+      }
     },
-    "expected": {}
+    "expected": {
+      "x_first": "019e3a64-c112-7001-b333-36e93c848dae",
+      "y_excluded": "019e3a64-c128-7001-b81f-160800d93c74"
+    }
   },
   {
-    "stage": "adversarial.linguistic",
-    "name": "aspirational_versus_committed",
-    "intent": "'We'd love to ship by Q4' must NOT be extracted as a Q4 commitment with high confidence",
+    "stage": "retrieval",
+    "name": "second_pass_sparse_activation",
+    "intent": "Sparse primary result triggers second-pass with reason 'sparse'",
     "passed": true,
-    "elapsed_ms": 6387,
+    "elapsed_ms": 69,
     "diff": "",
     "error": null,
     "actual": {
-      "obs_id": "019e3a48-aa90-7000-b35b-5c1e5f218256",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9042,
-        "output_tokens": 456,
-        "cost_usd": 0.0029429400000000002,
-        "latency_ms": 6307
-      },
-      "models": [
-        {
-          "id": "019e3a48-c35d-7000-a980-e79407ab114d",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"team\", \"assertion\": \"aspires to ship multi-region support, targeting Q4 but with no hard deadline \u2014 will ship when ready and bandwidth permits\"}",
-          "natural": "The team wants to ship multi-region by Q4 but is not committing to that date; they'll ship when ready and bandwidth allows.",
-          "confidence": 0.33249999999999996,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "state"
-      ],
-      "model_naturals": [
-        "The team wants to ship multi-region by Q4 but is not committing to that date; they'll ship when ready and bandwidth allows."
-      ]
+      "n_primary_models": 2,
+      "should_run": true,
+      "trigger_condition": "sparse_primary"
     },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "threading_reply_no_context",
-    "intent": "A reply ('+1 to what Sarah said', 'should we kill it', 'agreed') without the parent message must NOT produce a confident decision",
-    "passed": true,
-    "elapsed_ms": 4933,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-c06c-7000-8143-fe4415440223",
-      "status": "success",
-      "ops_applied_count": 0,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9002,
-        "output_tokens": 270,
-        "cost_usd": 0.00272754,
-        "latency_ms": 4876
-      },
-      "models": [],
-      "model_count": 0,
-      "model_kinds": [],
-      "model_naturals": []
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "hedged_commitment_low_confidence",
-    "intent": "Stacked hedges ('I think', 'probably', 'eventually', 'maybe', 'no promises') must not produce a >=0.7 confidence Model",
-    "passed": true,
-    "elapsed_ms": 5267,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-c383-7000-a57e-4e3868630af8",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9015,
-        "output_tokens": 424,
-        "cost_usd": 0.00290045,
-        "latency_ms": 5187
-      },
-      "models": [
-        {
-          "id": "019e3a48-d7f0-7000-bc63-cda185a1fb05",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"dashboard work\", \"assertion\": \"timeline is uncertain and aspirational, with no committed delivery date\"}",
-          "natural": "The dashboard work timeline is aspirational and uncommitted, with delivery possibly slipping to next quarter.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "state"
-      ],
-      "model_naturals": [
-        "The dashboard work timeline is aspirational and uncommitted, with delivery possibly slipping to next quarter."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "sarcastic_reversal_definitely",
-    "intent": "'Sure, that will definitely happen' followed by sarcastic context must produce a launch-risk concern, not a confident on-time prediction",
-    "passed": true,
-    "elapsed_ms": 7876,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-d3b4-7000-9c6d-2a53633fcc04",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9038,
-        "output_tokens": 542,
-        "cost_usd": 0.0030364600000000004,
-        "latency_ms": 7794
-      },
-      "models": [
-        {
-          "id": "019e3a48-f255-7000-a27e-6d4fc78c2a17",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"launch timeline\", \"nature\": \"The speaker is sarcastically dismissing the likelihood of on-time delivery, referencing a pattern of missed deadlines, and explicitly states they are putting the launch at risk.\", \"raised_by\": \"019e3a48-d3ab-7000-b320-704c744b2b8a\"}",
-          "natural": "The speaker is expressing that the launch is at risk, sarcastically dismissing the possibility of hitting the deadline given a pattern of prior missed deadlines.",
-          "confidence": 0.5060000000000001,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "concern"
-      ],
-      "model_naturals": [
-        "The speaker is expressing that the launch is at risk, sarcastically dismissing the possibility of hitting the deadline given a pattern of prior missed deadlines."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "bot_system_actor_signal",
-    "intent": "Bot-authored signal (CI failure) \u2014 should this produce a Concern Node, an Observation only, or an Act-layer change?",
-    "passed": true,
-    "elapsed_ms": 9869,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-d819-7000-a6f9-44be88b68407",
-      "status": "success",
-      "ops_applied_count": 2,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9056,
-        "output_tokens": 797,
-        "cost_usd": 0.0033218200000000005,
-        "latency_ms": 9776
-      },
-      "models": [
-        {
-          "id": "019e3a48-fe77-7000-a1ef-096fa651fe6e",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"payment-team\", \"assertion\": \"CI build #4711 failed after 3 retries on test_payment_capture_idempotency; last passing build was 4 days ago.\"}",
-          "natural": "CI build #4711 for the payment team failed on the idempotency test after exhausting retries, and no build has passed that test in 4 days.",
-          "confidence": 0.8075,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": "{\"kind\": \"observation_pattern\", \"pattern\": \"Build #4711 passes test_payment_capture_idempotency or a subsequent build passes it within 24 hours\", \"within_window\": \"P1D\"}"
-        },
-        {
-          "id": "019e3a48-fe86-7000-8a24-8778bcac6352",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"payment capture idempotency\", \"nature\": \"A critical payment idempotency test has been failing for 4+ days with no passing build, indicating a regression that could affect payment reliability in production.\", \"raised_by\": \"CI bot\"}",
-          "natural": "The payment capture idempotency test has been failing for 4 days without a fix, raising risk of payment processing reliability issues.",
-          "confidence": 0.5980000000000001,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 2,
-      "model_kinds": [
-        "state",
-        "concern"
-      ],
-      "model_naturals": [
-        "CI build #4711 for the payment team failed on the idempotency test after exhausting retries, and no build has passed that test in 4 days.",
-        "The payment capture idempotency test has been failing for 4 days without a fix, raising risk of payment processing reliability issues."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "ambiguous_entity_reference",
-    "intent": "Same string 'ACME' refers to two different entities; the substrate must not collapse them into one scope",
-    "passed": true,
-    "elapsed_ms": 7584,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-f277-7000-a33b-57c8c1764ca6",
-      "status": "success",
-      "ops_applied_count": 2,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9075,
-        "output_tokens": 660,
-        "cost_usd": 0.0031762500000000003,
-        "latency_ms": 7506
-      },
-      "models": [
-        {
-          "id": "019e3a49-0ff0-7000-b4ff-caa3baacc0eb",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"ACME (customer)\", \"nature\": \"Customer ACME is at risk of churning this quarter, with pricing pushback raised again on a recent call.\", \"raised_by\": \"019e3a48-f26f-7001-8525-a2b9e9034eda\"}",
-          "natural": "Customer ACME is at risk of churning this quarter, with pricing pushback raised again on a recent call.",
-          "confidence": 0.5060000000000001,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": null
-        },
-        {
-          "id": "019e3a49-0ffd-7000-a9f6-1143015b97ee",
-          "proposition": "{\"kind\": \"state\", \"subject\": \"ACME (internal tooling team)\", \"assertion\": \"The internal ACME tooling team's engineering side is in good shape \u2014 no concerns.\"}",
-          "natural": "The internal ACME tooling team's engineering side is in good shape with no concerns.",
-          "confidence": 0.5225,
-          "proposition_kind": "state",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 2,
-      "model_kinds": [
-        "concern",
-        "state"
-      ],
-      "model_naturals": [
-        "Customer ACME is at risk of churning this quarter, with pricing pushback raised again on a recent call.",
-        "The internal ACME tooling team's engineering side is in good shape with no concerns."
-      ]
-    },
-    "expected": {}
-  },
-  {
-    "stage": "adversarial.linguistic",
-    "name": "compound_linguistic_pressure",
-    "intent": "Compound (sarcasm + double negation + conditional + aspirational) \u2014 engine should produce nothing high-confidence",
-    "passed": true,
-    "elapsed_ms": 8453,
-    "diff": "",
-    "error": null,
-    "actual": {
-      "obs_id": "019e3a48-fea5-7000-b5a0-767a139074cf",
-      "status": "success",
-      "ops_applied_count": 1,
-      "error": null,
-      "llm": {
-        "model": "deepseek-chat",
-        "calls": 1,
-        "input_tokens": 9058,
-        "output_tokens": 572,
-        "cost_usd": 0.00307486,
-        "latency_ms": 8377
-      },
-      "models": [
-        {
-          "id": "019e3a49-1f88-7000-879d-d3273160c01f",
-          "proposition": "{\"kind\": \"concern\", \"about\": \"team funding and multi-region timeline\", \"nature\": \"The team's ability to ship multi-region by Q4 is contingent on leadership funding, and the speaker expresses frustration with repeated delays, suggesting the team is underfunded or deprioritized.\", \"raised_by\": \"019e3a48-fe9f-7000-aaba-42ed2f4bb802\"}",
-          "natural": "The team is frustrated that leadership has not funded multi-region work, causing delays and making a Q4 ship date aspirational rather than committed.",
-          "confidence": 0.5060000000000001,
-          "proposition_kind": "concern",
-          "status": "active",
-          "falsifier": null
-        }
-      ],
-      "model_count": 1,
-      "model_kinds": [
-        "concern"
-      ],
-      "model_naturals": [
-        "The team is frustrated that leadership has not funded multi-region work, causing delays and making a Q4 ship date aspirational rather than committed."
-      ]
-    },
-    "expected": {}
+    "expected": {
+      "should_run": true,
+      "expected_condition_substring": "sparse",
+      "max_primary_models": 4
+    }
   }
 ]

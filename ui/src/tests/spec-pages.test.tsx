@@ -5,12 +5,33 @@ import { MemoryRouter } from "react-router-dom";
 import TodayBriefing from "@/pages/today-v2/Briefing";
 import { TODAY_PAGE_FIXTURE } from "@/api/today-page-mock";
 import ModelSpec from "@/pages/model/ModelSpec";
-import ForecastsSpec from "@/pages/forecasts/ForecastsSpec";
+import ForecastsPage from "@/pages/forecasts/ForecastsPage";
+import {
+  ACCURACY_FIXTURE,
+  FORECASTS_PAGE_FIXTURE,
+  PATTERNS_FIXTURE,
+} from "@/api/forecasts-page-mock";
 import LedgerSpec from "@/pages/ledger/LedgerSpec";
 
 // Today v2 talks to /api/today; back the page with the same mock the
 // dedicated today-v2.test.tsx suite uses so the smoke test renders the
 // real component tree without a network round-trip.
+vi.mock("@/api/forecasts-client", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(m: string, s: number) {
+      super(m);
+      this.status = s;
+    }
+  },
+  getForecastsPage: vi.fn(async () => FORECASTS_PAGE_FIXTURE),
+  getForecastDetail: vi.fn(async () => FORECASTS_PAGE_FIXTURE.forecast_details_by_id[FORECASTS_PAGE_FIXTURE.selected_forecast_id ?? ""]),
+  getPatterns: vi.fn(async () => ({ patterns: PATTERNS_FIXTURE, count: PATTERNS_FIXTURE.length })),
+  getAccuracy: vi.fn(async () => ACCURACY_FIXTURE),
+  askForecasts: vi.fn(async () => ({ type: "forecast_explanation", title: "stub", body: "stub" })),
+  createScenario: vi.fn(async () => null),
+}));
+
 vi.mock("@/api/today-page-client", () => ({
   ApiError: class ApiError extends Error {
     status: number;
@@ -82,10 +103,17 @@ describe("Model (spec)", () => {
   });
 });
 
-describe("Forecasts (spec)", () => {
-  it("renders a forecast statement and confidence", () => {
-    render(wrap(<ForecastsSpec />));
-    expect(screen.getAllByText(/Beacon renewal risk/i).length).toBeGreaterThan(0);
+describe("Forecasts (spec v1.0)", () => {
+  it("renders the page heading and a forecast statement", async () => {
+    render(wrap(<ForecastsPage />, "/forecasts"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /^Forecasts$/ })).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Beacon renewal risk/i).length,
+      ).toBeGreaterThan(0),
+    );
   });
 });
 

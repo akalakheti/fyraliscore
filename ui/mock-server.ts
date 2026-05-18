@@ -298,44 +298,35 @@ export function mockBackend(): Plugin {
           return;
         }
 
-        // ---- Wave 2: Forecasts ------------------------------------
-        if (method === "GET" && url.startsWith("/api/v1/forecasts/summary")) {
-          const { FORECASTS_SUMMARY_FIXTURE } = await import("./src/api/forecasts-mock");
-          json(res, FORECASTS_SUMMARY_FIXTURE);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/api/v1/forecasts/accuracy")) {
-          const { FORECASTS_ACCURACY_FIXTURE } = await import("./src/api/forecasts-mock");
-          json(res, FORECASTS_ACCURACY_FIXTURE);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/api/v1/forecasts/risk_exposure")) {
-          const { FORECASTS_RISK_EXPOSURE_FIXTURE } = await import("./src/api/forecasts-mock");
-          json(res, FORECASTS_RISK_EXPOSURE_FIXTURE);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/api/v1/forecasts/upcoming")) {
-          const { FORECASTS_UPCOMING_FIXTURE } = await import("./src/api/forecasts-mock");
-          json(res, FORECASTS_UPCOMING_FIXTURE);
-          return;
-        }
-        if (method === "POST" && /^\/api\/v1\/forecasts\/?(\?|$)/.test(url)) {
-          const { mockCreatedPrediction } = await import("./src/api/forecasts-mock");
-          const body = await readJson(req);
-          json(res, mockCreatedPrediction(body), 201);
-          return;
-        }
-        const fcDetailMatch = url.match(/^\/api\/v1\/forecasts\/([^/?]+)(?:\?.*)?$/);
-        if (method === "GET" && fcDetailMatch) {
-          const { detailForId } = await import("./src/api/forecasts-mock");
-          json(res, detailForId(fcDetailMatch[1]));
-          return;
-        }
-        if (method === "GET" && url.startsWith("/api/v1/forecasts")) {
-          const { FORECASTS_LIST_FIXTURE, FORECASTS_RESOLVED_FIXTURE } = await import("./src/api/forecasts-mock");
-          const isResolved = url.includes("status=resolved");
-          json(res, isResolved ? FORECASTS_RESOLVED_FIXTURE : FORECASTS_LIST_FIXTURE);
-          return;
+        // ---- Forecasts (v1.0 spec) --------------------------------
+        // Mock fallbacks live in ./src/api/forecasts-page-mock.ts so the
+        // page renders against fixtures when the backend proxy is down.
+        if (url.startsWith("/api/v1/forecasts/")) {
+          const fc = await import("./src/api/forecasts-page-mock");
+          if (method === "GET" && url.startsWith("/api/v1/forecasts/page")) {
+            json(res, fc.FORECASTS_PAGE_FIXTURE);
+            return;
+          }
+          if (method === "GET" && url.startsWith("/api/v1/forecasts/patterns")) {
+            json(res, { patterns: fc.PATTERNS_FIXTURE, count: fc.PATTERNS_FIXTURE.length });
+            return;
+          }
+          if (method === "GET" && url.startsWith("/api/v1/forecasts/accuracy")) {
+            json(res, fc.ACCURACY_FIXTURE);
+            return;
+          }
+          if (method === "POST" && url.startsWith("/api/v1/forecasts/ask")) {
+            const body = await readJson(req);
+            json(res, fc.askFixture(body));
+            return;
+          }
+          const detailMatch = url.match(/^\/api\/v1\/forecasts\/detail\/([^/?]+)/);
+          if (method === "GET" && detailMatch) {
+            const found = fc.detailFor(detailMatch[1]);
+            if (found) json(res, found);
+            else json(res, { error: "not_found" }, 404);
+            return;
+          }
         }
 
         // ---- Wave 2: Model trace ----------------------------------

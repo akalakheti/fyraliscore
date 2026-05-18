@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from lib.shared.errors import ValidationError
 from services.forecasts import accuracy as accuracy_mod
+from services.forecasts import page as page_mod
 from services.forecasts import repo as repo_mod
 
 
@@ -206,6 +207,108 @@ def build_router() -> APIRouter:
             _serialize_prediction(row),
             status_code=httpstatus.HTTP_201_CREATED,
         )
+
+    # -----------------------------------------------------------------
+    # Spec v1.0 endpoints — Forecasts page rewrite (4 modes, foresight
+    # brief, horizon matrix, patterns, ask). Mounted before the
+    # `/{prediction_id}` catch-all so the static paths win.
+    # -----------------------------------------------------------------
+
+    @router.get("/page")
+    async def page_endpoint(request: Request) -> JSONResponse:
+        """Initial payload for the Forecasts page (Horizon mode default).
+
+        Composes header, foresight brief, horizon matrix, default
+        selection + detail, patterns, and accuracy summary in one
+        round trip so the first paint doesn't N+1.
+        """
+        auth = _auth(request)
+        pool = _pool(request)
+        qp = request.query_params
+        try:
+            horizon_days = int(qp.get("horizon_days", "90"))
+        except (TypeError, ValueError):
+            return _bad("invalid_horizon_days")
+        async with pool.acquire() as conn:
+            payload = await page_mod.build_page_payload(
+                conn, auth.tenant_id, horizon_days=horizon_days,
+            )
+        return JSONResponse(payload)
+
+    @router.get("/patterns")
+    async def patterns_endpoint(request: Request) -> JSONResponse:
+        """Pattern Field cards + Patterns mode payload."""
+        auth = _auth(request)
+        pool = _pool(request)
+        async with pool.acquire() as conn:
+            patterns = await page_mod.list_patterns(conn, auth.tenant_id)
+        return JSONResponse({"patterns": patterns, "count": len(patterns)})
+
+    @router.get("/detail/{forecast_id}")
+    async def detail_v2_endpoint(
+        forecast_id: str, request: Request,
+    ) -> JSONResponse:
+        """Spec ForecastDetail — driving patterns, leading indicators,
+        falsifiers, intervention levers, related context."""
+        auth = _auth(request)
+        pool = _pool(request)
+        try:
+            fid = UUID(forecast_id)
+        except (ValueError, TypeError):
+            return _bad("invalid_forecast_id")
+        async with pool.acquire() as conn:
+            detail = await page_mod.build_forecast_detail(
+                conn, auth.tenant_id, fid,
+            )
+        if detail is None:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse(detail)
+
+    @router.post("/ask")
+    async def ask_endpoint(request: Request) -> JSONResponse:
+        """Ask Fyralis (forecast-scoped). Returns a ForecastAskResponse
+        keyed off the prompt intent (explanation/scenario/falsifier/
+        intervention/pattern/accuracy).
+        """
+        auth = _auth(request)
+        pool = _pool(request)
+        try:
+            body = await request.json()
+        except Exception:
+            return _bad("invalid_json")
+        if not isinstance(body, dict):
+            return _bad("invalid_body")
+        prompt = body.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return _bad("missing_prompt")
+        selected = body.get("selected_forecast_id")
+        try:
+            selected_uuid = UUID(selected) if selected else None
+        except (ValueError, TypeError):
+            return _bad("invalid_selected_forecast_id")
+        visible_raw = body.get("visible_forecast_ids") or []
+        visible: list[UUID] = []
+        if isinstance(visible_raw, list):
+            for v in visible_raw:
+                try:
+                    visible.append(UUID(str(v)))
+                except (ValueError, TypeError):
+                    continue
+        req = page_mod.AskRequest(
+            page="forecasts",
+            mode=str(body.get("mode") or "horizon"),
+            selected_forecast_id=selected_uuid,
+            selected_pattern_id=(
+                str(body.get("selected_pattern_id"))
+                if body.get("selected_pattern_id") else None
+            ),
+            prompt=prompt,
+            visible_forecast_ids=visible,
+            horizon_days=int(body.get("horizon_days") or 90),
+        )
+        async with pool.acquire() as conn:
+            resp = await page_mod.handle_ask(conn, auth.tenant_id, req)
+        return JSONResponse(resp)
 
     @router.get("/{prediction_id}")
     async def detail_endpoint(

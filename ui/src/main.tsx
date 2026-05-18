@@ -10,7 +10,7 @@ import {
 
 import TodayBriefing from "./pages/today-v2/Briefing";
 import ModelPageV2 from "./pages/model-v2/ModelPage";
-import ForecastsSpec from "./pages/forecasts/ForecastsSpec";
+import ForecastsPage from "./pages/forecasts/ForecastsPage";
 import LedgerSpec from "./pages/ledger/LedgerSpec";
 import { AutoDemoSession } from "./shell/AutoDemoSession";
 import { DebugLayout } from "./debug/DebugLayout";
@@ -24,6 +24,7 @@ import { Cache } from "./debug/pages/Cache";
 
 import "./index.css";
 import "./styles/spec.css";
+import "./styles/forecasts.css";
 import "./pages/model-v2/styles.css";
 
 const root = document.getElementById("root");
@@ -59,7 +60,7 @@ ReactDOM.createRoot(root).render(
           path="/forecasts"
           element={
             <AutoDemoSession>
-              <ForecastsSpec />
+              <ForecastsPage />
             </AutoDemoSession>
           }
         />

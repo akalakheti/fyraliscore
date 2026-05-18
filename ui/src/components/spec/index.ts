@@ -15,7 +15,5 @@ export { ThreadInspector } from "./ThreadInspector";
 export { LensBar } from "./LensBar";
 export { RecentChangesStrip } from "./RecentChangesStrip";
 export { CommandPalette } from "./CommandPalette";
-export { ForecastRow } from "./ForecastRow";
-export { ForecastInspector } from "./ForecastInspector";
 export { LedgerEventRow } from "./LedgerEventRow";
 export { LedgerEventInspector } from "./LedgerEventInspector";

@@ -1,23 +1,18 @@
-// HTTP client for the Forecasts page surface.
-// Endpoints live under /api when running against the Vite dev server
-// (see vite.config.ts proxy). The mock-server.ts plugin (when wired)
-// or page-level route() handlers serve these against the fixture in
-// src/api/forecasts-mock.ts.
+// HTTP client for the Forecasts page v1.0 spec endpoints.
+// Backend: services/forecasts/router.py. Endpoints are mounted under
+// /api when running through the Vite dev proxy.
 
 import { ApiError } from "./client";
 import { getAuthHeader, handleAuthFailure } from "./auth";
 import type {
   AccuracyResponse,
   CreateScenarioBody,
-  ForecastCategory,
-  ForecastSort,
-  ForecastStatus,
-  ListResponse,
-  PredictionDetail,
+  ForecastAskRequest,
+  ForecastAskResponse,
+  ForecastDetail,
+  ForecastsPagePayload,
+  PatternsResponse,
   PredictionRow,
-  RiskExposureResponse,
-  SummaryResponse,
-  UpcomingResponse,
 } from "./forecasts-types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -25,7 +20,7 @@ const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 async function request<T>(
   path: string,
   init?: RequestInit,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -43,94 +38,64 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
-export interface ListParams {
-  status?: ForecastStatus;
-  category?: ForecastCategory;
-  sort?: ForecastSort;
-  limit?: number;
-}
-
-function buildQuery(params: Record<string, string | number | undefined>): string {
-  const usp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === "") continue;
-    usp.set(k, String(v));
-  }
-  const s = usp.toString();
-  return s ? `?${s}` : "";
-}
-
-export function listForecasts(
-  params: ListParams = {},
-  signal?: AbortSignal
-): Promise<ListResponse> {
-  const q = buildQuery({
-    status: params.status ?? "active",
-    category: params.category,
-    sort: params.sort ?? "earliest_resolution",
-    limit: params.limit,
-  });
-  return request<ListResponse>(`/v1/forecasts/${q}`, undefined, signal);
-}
-
-export function getSummary(signal?: AbortSignal): Promise<SummaryResponse> {
-  return request<SummaryResponse>("/v1/forecasts/summary", undefined, signal);
-}
-
-export function getForecast(
-  id: string,
-  signal?: AbortSignal
-): Promise<PredictionDetail> {
-  return request<PredictionDetail>(
-    `/v1/forecasts/${encodeURIComponent(id)}`,
+export function getForecastsPage(
+  horizonDays = 90,
+  signal?: AbortSignal,
+): Promise<ForecastsPagePayload> {
+  return request<ForecastsPagePayload>(
+    `/v1/forecasts/page?horizon_days=${horizonDays}`,
     undefined,
-    signal
+    signal,
+  );
+}
+
+export function getForecastDetail(
+  id: string,
+  signal?: AbortSignal,
+): Promise<ForecastDetail> {
+  return request<ForecastDetail>(
+    `/v1/forecasts/detail/${encodeURIComponent(id)}`,
+    undefined,
+    signal,
+  );
+}
+
+export function getPatterns(
+  signal?: AbortSignal,
+): Promise<PatternsResponse> {
+  return request<PatternsResponse>("/v1/forecasts/patterns", undefined, signal);
+}
+
+export function askForecasts(
+  body: ForecastAskRequest,
+  signal?: AbortSignal,
+): Promise<ForecastAskResponse> {
+  return request<ForecastAskResponse>(
+    "/v1/forecasts/ask",
+    { method: "POST", body: JSON.stringify(body) },
+    signal,
   );
 }
 
 export function getAccuracy(
   rangeDays = 180,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<AccuracyResponse> {
   return request<AccuracyResponse>(
-    `/v1/forecasts/accuracy?range_days=${rangeDays}`,
+    `/v1/forecasts/accuracy?days=${rangeDays}`,
     undefined,
-    signal
-  );
-}
-
-export function getRiskExposure(
-  metric = "arr_at_risk",
-  days = 90,
-  signal?: AbortSignal
-): Promise<RiskExposureResponse> {
-  const q = buildQuery({ metric, days });
-  return request<RiskExposureResponse>(
-    `/v1/forecasts/risk_exposure${q}`,
-    undefined,
-    signal
-  );
-}
-
-export function getUpcoming(
-  days = 14,
-  signal?: AbortSignal
-): Promise<UpcomingResponse> {
-  return request<UpcomingResponse>(
-    `/v1/forecasts/upcoming?days=${days}`,
-    undefined,
-    signal
+    signal,
   );
 }
 
 export function createScenario(
   body: CreateScenarioBody,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<PredictionRow> {
   return request<PredictionRow>(
     "/v1/forecasts/",
     { method: "POST", body: JSON.stringify(body) },
-    signal
+    signal,
   );
 }
 
