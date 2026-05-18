@@ -18,6 +18,10 @@ export type ActiveRoute =
 
 export interface SidebarProps {
   activeRoute?: ActiveRoute;
+  // "expanded" is the default. "collapsed" renders the icon rail for
+  // Review Mode — labels, shortcuts, and the full status / user cards
+  // are hidden; hover expands the rail as an overlay (handled in CSS).
+  mode?: "expanded" | "collapsed";
 }
 
 interface NavItem {
@@ -34,15 +38,29 @@ const primaryNav: NavItem[] = [
   { route: "ledger", label: "Ledger", to: "/ledger", icon: <IconLedger /> },
 ];
 
+const shortcutNav: NavItem[] = [
+  { route: "commitments", label: "Commitments", to: "/commitments", icon: <IconDot /> },
+  { route: "customers", label: "Customers", to: "/customers", icon: <IconDot /> },
+  { route: "risks", label: "Risks", to: "/risks", icon: <IconDot /> },
+  { route: "decisions", label: "Decisions", to: "/decisions", icon: <IconDot /> },
+  { route: "owners", label: "Owners", to: "/owners", icon: <IconDot /> },
+  { route: "teams", label: "Teams", to: "/teams", icon: <IconDot /> },
+];
+
 const utilityNav: NavItem[] = [
   { route: "ask", label: "Ask Fyralis", to: "/ask", icon: <IconAsk /> },
   { route: "sources", label: "Sources", to: "/sources", icon: <IconSources /> },
   { route: "settings", label: "Settings", to: "/settings", icon: <IconSettings /> },
 ];
 
-export function Sidebar({ activeRoute = "today" }: SidebarProps) {
+export function Sidebar({ activeRoute = "today", mode = "expanded" }: SidebarProps) {
+  const collapsed = mode === "collapsed";
   return (
-    <nav className="fy-sidebar">
+    <nav
+      className={`fy-sidebar${collapsed ? " fy-sidebar--collapsed" : ""}`}
+      data-mode={mode}
+      data-testid="app-sidebar"
+    >
       <ForestDecoration />
 
       <div className="fy-sidebar__brand">
@@ -56,9 +74,25 @@ export function Sidebar({ activeRoute = "today" }: SidebarProps) {
         ))}
       </div>
 
-      <div className="fy-sidebar__spacer" />
+      <hr className="fy-sidebar__divider fy-sidebar__only-expanded" />
+      <div className="fy-sidebar__group-label fy-sidebar__only-expanded">Shortcuts</div>
+      <div
+        className="fy-sidebar__group fy-sidebar__only-expanded"
+        role="group"
+        aria-label="Shortcuts"
+      >
+        {shortcutNav.map((item) => (
+          <SidebarLink
+            key={item.route}
+            item={item}
+            active={activeRoute === item.route}
+            variant="secondary"
+          />
+        ))}
+      </div>
 
-      <div className="fy-sidebar__group-label">Utilities</div>
+      <hr className="fy-sidebar__divider fy-sidebar__only-expanded" />
+      <div className="fy-sidebar__group-label fy-sidebar__only-expanded">Utilities</div>
       <div className="fy-sidebar__group" role="group" aria-label="Utilities">
         {utilityNav.map((item) => (
           <SidebarLink
@@ -69,6 +103,8 @@ export function Sidebar({ activeRoute = "today" }: SidebarProps) {
           />
         ))}
       </div>
+
+      <div className="fy-sidebar__spacer" />
 
       <ModelHealthCard />
       <UserCard />
@@ -92,11 +128,11 @@ function SidebarLink({ item, active, variant = "primary" }: SidebarLinkProps) {
     .join(" ");
 
   return (
-    <NavLink to={item.to} className={className} end={item.to === "/today"}>
+    <NavLink to={item.to} className={className} end={item.to === "/today"} title={item.label}>
       <span className="fy-sidebar__nav-icon" aria-hidden="true">
         {item.icon}
       </span>
-      <span>{item.label}</span>
+      <span className="fy-sidebar__nav-label">{item.label}</span>
     </NavLink>
   );
 }
@@ -106,11 +142,11 @@ function ModelHealthCard() {
     <div className="fy-sidebar__health" aria-label="Model health">
       <div className="fy-sidebar__health-row">
         <span className="fy-sidebar__health-dot" aria-hidden="true" />
-        <span className="fy-sidebar__health-label">Live</span>
+        <span className="fy-sidebar__health-label fy-sidebar__only-expanded">Live</span>
       </div>
-      <div className="fy-sidebar__health-status">All systems normal</div>
+      <div className="fy-sidebar__health-status fy-sidebar__only-expanded">All systems normal</div>
       <svg
-        className="fy-sidebar__health-spark"
+        className="fy-sidebar__health-spark fy-sidebar__only-expanded"
         viewBox="0 0 120 18"
         preserveAspectRatio="none"
         aria-hidden="true"
@@ -130,7 +166,7 @@ function UserCard() {
   return (
     <div className="fy-sidebar__user" aria-label="Current user">
       <div className="fy-sidebar__avatar" aria-hidden="true">D</div>
-      <div>
+      <div className="fy-sidebar__only-expanded">
         <div className="fy-sidebar__user-name">Diana</div>
         <div className="fy-sidebar__user-role">CEO</div>
       </div>
@@ -243,6 +279,14 @@ function IconSettings() {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
       <circle cx="8" cy="8" r="2" />
       <path d="M8 1.5v2M8 12.5v2M14.5 8h-2M3.5 8h-2M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4M12.6 12.6l-1.4-1.4M4.8 4.8 3.4 3.4" />
+    </svg>
+  );
+}
+
+function IconDot() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.4" fill="currentColor" opacity="0.55" />
     </svg>
   );
 }

@@ -43,20 +43,20 @@ function wrap(node: React.ReactElement, initialPath = "/") {
 describe("Today (spec)", () => {
   it("renders the page heading and at least one Decision Delta", async () => {
     render(wrap(<TodayBriefing />, "/today"));
-    // The briefing renders a loading skeleton first; wait for the
-    // hydrated header.
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: /^Today$/ })).toBeTruthy(),
     );
     await waitFor(() =>
       expect(
-        screen.getByText(/Salesforce sync instability/i),
-      ).toBeInTheDocument(),
+        screen.getAllByText(/Salesforce sync instability/i).length,
+      ).toBeGreaterThan(0),
     );
   });
 
   it("labels the focused review surface as a Proposed change", async () => {
-    render(wrap(<TodayBriefing />, "/today"));
+    // The "Proposed change" label only appears inside the focused
+    // review sheet, which lives in Review Mode (?review=<id>).
+    render(wrap(<TodayBriefing />, "/today?review=delta-primary-001"));
     await waitFor(() =>
       expect(screen.getAllByText(/Proposed change/i).length).toBeGreaterThan(0),
     );

@@ -9613,6 +9613,17 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
   color: var(--text-on-dark);
   display: flex;
   flex-direction: column;
+  transition: flex-basis 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Review-mode icon rail. The flex item shrinks to 72px so the page
+ * gets back its reading width; the inner nav also collapses to 72px
+ * but expands to 260px as an overlay on hover/focus (see below). */
+.fy-shell__sidebar--collapsed {
+  flex: 0 0 72px;
+  width: 72px;
+  z-index: 35;
 }
 
 .fy-shell__main {
@@ -9881,6 +9892,132 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
   font-size: 11px;
   color: rgba(221, 215, 203, 0.5);
   line-height: 1.2;
+}
+
+.fy-sidebar__nav-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Collapsed (icon-rail) sidebar variant ───
+ * Used in Today's Review Mode. The rail stays 72px wide so the page
+ * reading column stays intact; on hover/focus the inner .fy-sidebar
+ * expands to 260px and floats over the page content with a shadow,
+ * never reflowing the layout. */
+
+.fy-sidebar--collapsed {
+  width: 72px;
+  padding: var(--space-5) var(--space-2);
+  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 35;
+  /* When hover-expanded, this becomes an overlay; the outer flex item
+   * keeps its 72px so the page doesn't shift. */
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100vh;
+}
+
+.fy-sidebar--collapsed .fy-sidebar__only-expanded {
+  display: none;
+}
+
+.fy-sidebar--collapsed .fy-sidebar__brand {
+  justify-content: center;
+  gap: 0;
+  padding: var(--space-1) 0 var(--space-5);
+}
+.fy-sidebar--collapsed .fy-sidebar__wordmark { display: none; }
+
+.fy-sidebar--collapsed .fy-sidebar__nav-item {
+  justify-content: center;
+  padding: 10px 0;
+  gap: 0;
+}
+.fy-sidebar--collapsed .fy-sidebar__nav-label {
+  /* Reserved space for the label so it can appear smoothly on expand. */
+  width: 0;
+  opacity: 0;
+  transition: width 180ms ease, opacity 180ms ease;
+}
+
+.fy-sidebar--collapsed .fy-sidebar__health {
+  background: transparent;
+  border: none;
+  padding: var(--space-2);
+  align-items: center;
+}
+.fy-sidebar--collapsed .fy-sidebar__health-row { justify-content: center; }
+
+.fy-sidebar--collapsed .fy-sidebar__user {
+  background: transparent;
+  border: none;
+  padding: var(--space-2);
+  justify-content: center;
+}
+
+/* Hover / focus expansion overlay. Delays match
+ *   --sidebar-hover-delay: 180ms; --sidebar-collapse-delay: 300ms */
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed {
+  width: 260px;
+  padding: var(--space-5) var(--space-4);
+  transition-delay: 180ms;
+  box-shadow: 12px 0 32px rgba(7, 23, 19, 0.25);
+}
+
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__only-expanded,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__only-expanded {
+  display: revert;
+}
+
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__brand,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__brand {
+  justify-content: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-5);
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__wordmark,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__wordmark {
+  display: revert;
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__nav-item,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__nav-item {
+  justify-content: flex-start;
+  padding: 10px var(--space-3);
+  gap: var(--space-3);
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__nav-label,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__nav-label {
+  width: auto;
+  opacity: 1;
+  transition-delay: 200ms;
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__health,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__health {
+  background: rgba(19, 38, 35, 0.55);
+  border: 1px solid rgba(221, 215, 203, 0.08);
+  padding: var(--space-3);
+  align-items: stretch;
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__health-row,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__health-row {
+  justify-content: flex-start;
+}
+.fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed .fy-sidebar__user,
+.fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed .fy-sidebar__user {
+  background: rgba(7, 23, 19, 0.6);
+  border: 1px solid rgba(221, 215, 203, 0.08);
+  padding: var(--space-3);
+  justify-content: flex-start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-shell__sidebar,
+  .fy-sidebar--collapsed,
+  .fy-sidebar--collapsed .fy-sidebar__nav-label {
+    transition: none !important;
+  }
 }
 
 /* ─── Page placeholder ─── */

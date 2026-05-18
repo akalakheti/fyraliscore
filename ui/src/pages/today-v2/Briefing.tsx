@@ -1,9 +1,14 @@
-// Today page — Briefing Mode. Default landing surface.
+// Today page — two modes: Briefing + Review.
 //
-// Layout: header → vertical queue of judgment cards.
-// One card at a time enters Focused Review state in place; the rest
-// remain visible above and below as compact rows. No navigation, no
-// modal, no separate inspector (spec §4.2).
+//   Briefing Mode (default, `/today`):
+//     Today header → Fyralis Brief → Primary Judgment Preview →
+//     Other Items → Handled Without You.
+//
+//   Review Mode (`/today?review=<id>`):
+//     Global sidebar collapses to an icon rail (with hover-expand).
+//     A local Review Queue Rail appears alongside a Focused Review
+//     Sheet for the selected proposed change. Switching items stays in
+//     Review Mode; Collapse / Esc returns to Briefing.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -15,8 +20,15 @@ import { useTodayPage } from "@/hooks/useTodayPage";
 import { getDeltaEvidence } from "@/api/today-page-client";
 
 import { BriefingHeader } from "@/components/today-v2/BriefingHeader";
+import {
+  FyralisBrief,
+  deriveWhatChanged,
+} from "@/components/today-v2/FyralisBrief";
+import { PrimaryJudgmentPreview } from "@/components/today-v2/PrimaryJudgmentPreview";
+import { OtherItemsList } from "@/components/today-v2/OtherItemsList";
+import { HandledWithoutYou } from "@/components/today-v2/HandledWithoutYou";
+import { ReviewQueueRail } from "@/components/today-v2/ReviewQueueRail";
 import { FocusedReviewCard } from "@/components/today-v2/FocusedReviewCard";
-import { CompactCard } from "@/components/today-v2/CompactCard";
 import { DelegationSheet } from "@/components/today-v2/DelegationSheet";
 import { CorrectionSheet } from "@/components/today-v2/CorrectionSheet";
 import { EvidenceDrawer } from "@/components/today-v2/EvidenceDrawer";
@@ -61,18 +73,50 @@ export default function TodayBriefing() {
     return list;
   }, [data]);
 
-  // Which card is in Focused Review state. On first render the primary
-  // judgment auto-expands so the user lands directly on the most urgent
-  // case. After that, the user owns the state — collapsing stays
-  // collapsed; opening another card swaps focus.
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const didAutoExpandRef = useRef(false);
-  useEffect(() => {
-    if (didAutoExpandRef.current) return;
-    if (orderedQueue.length === 0) return;
-    setExpandedId(orderedQueue[0].id);
-    didAutoExpandRef.current = true;
-  }, [orderedQueue]);
+  // Review state lives in the URL query (`?review=<id>`). When that
+  // param matches a known delta, we are in Review Mode; otherwise
+  // Briefing Mode. Reading from URL keeps deep-link + back-button
+  // behavior honest.
+  const reviewIdRaw = searchParams.get("review");
+  const reviewId = useMemo(() => {
+    if (!reviewIdRaw) return null;
+    return orderedQueue.some((d) => d.id === reviewIdRaw) ? reviewIdRaw : null;
+  }, [reviewIdRaw, orderedQueue]);
+  const reviewMode = reviewId !== null;
+  const selectedDelta = useMemo(
+    () => orderedQueue.find((d) => d.id === reviewId) ?? null,
+    [orderedQueue, reviewId],
+  );
+
+  const setReviewId = useCallback(
+    (id: string | null, opts?: { replace?: boolean }) => {
+      const next = new URLSearchParams(searchParams);
+      if (id) next.set("review", id);
+      else next.delete("review");
+      setSearchParams(next, { replace: opts?.replace ?? false });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const enterReview = useCallback(
+    (id: string) => {
+      setReviewId(id);
+      window.setTimeout(() => {
+        const heading = document.querySelector<HTMLElement>(
+          `#focused-${id} .tdv2-review__title`,
+        );
+        heading?.focus?.();
+      }, 0);
+    },
+    [setReviewId],
+  );
+
+  const exitReview = useCallback(() => setReviewId(null), [setReviewId]);
+
+  // Deep-link support stays automatic: ?review=<id> opens Review Mode
+  // on load. No legacy `?expand=` migration is needed for product
+  // users since this page never shipped behind that flag publicly.
+  // ---------------------------------------------------------------
 
   const positionOf = useCallback(
     (id: string): { index: number; total: number } | null => {
@@ -83,25 +127,15 @@ export default function TodayBriefing() {
     [orderedQueue],
   );
 
-  // Deep-link support: ?expand=<deltaId> auto-opens that card.
-  useEffect(() => {
-    const target = searchParams.get("expand");
-    if (!target || !data) return;
-    if (orderedQueue.some((d) => d.id === target)) {
-      setExpandedId(target);
-    }
-    const next = new URLSearchParams(searchParams);
-    next.delete("expand");
-    setSearchParams(next, { replace: true });
-  }, [data, orderedQueue, searchParams, setSearchParams]);
-
-  // Keyboard model. Esc collapses the open card or closes the top-most
-  // sheet. Letter shortcuts hit the visible action bar.
+  // Keyboard model. Spec §14: Esc collapse, J/K next/prev, A/D/E/R
+  // bound to action bar. Shortcuts only fire in Review Mode (and not
+  // while focus is inside an input/textarea or a sheet).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tag = (document.activeElement as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+
       if (e.key === "Escape") {
         if (evidenceDelta) {
           setEvidenceDelta(null);
@@ -112,8 +146,25 @@ export default function TodayBriefing() {
         } else if (correctionTarget) {
           setCorrectionTarget(null);
           e.preventDefault();
-        } else if (expandedId) {
-          setExpandedId(null);
+        } else if (reviewMode) {
+          exitReview();
+          e.preventDefault();
+        }
+        return;
+      }
+
+      if (!reviewMode || !selectedDelta) return;
+      if (delegateTarget || correctionTarget || evidenceDelta) return;
+
+      const idx = orderedQueue.findIndex((d) => d.id === selectedDelta.id);
+      if (e.key === "j" || e.key === "ArrowDown") {
+        if (idx + 1 < orderedQueue.length) {
+          setReviewId(orderedQueue[idx + 1].id, { replace: true });
+          e.preventDefault();
+        }
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        if (idx - 1 >= 0) {
+          setReviewId(orderedQueue[idx - 1].id, { replace: true });
           e.preventDefault();
         }
       }
@@ -121,10 +172,14 @@ export default function TodayBriefing() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [
-    delegateTarget,
     correctionTarget,
+    delegateTarget,
     evidenceDelta,
-    expandedId,
+    exitReview,
+    orderedQueue,
+    reviewMode,
+    selectedDelta,
+    setReviewId,
   ]);
 
   const showToast = useCallback((kind: ToastKind, text: string) => {
@@ -137,22 +192,8 @@ export default function TodayBriefing() {
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  const handleOpen = useCallback((id: string) => {
-    setExpandedId(id);
-    window.setTimeout(() => {
-      const el = document.getElementById(`focused-${id}`);
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-  }, []);
-
-  const handleCollapse = useCallback((id: string) => {
-    setExpandedId((current) => (current === id ? null : current));
-  }, []);
-
-  // Abort the in-flight evidence fetch when the user opens a different
-  // delta, closes the drawer, or unmounts the page, so a slow response
-  // can't overwrite the cache or clear the loading flag for a newer
-  // request.
+  // Abort an in-flight evidence fetch when the user opens a different
+  // delta, closes the drawer, or unmounts the page.
   const evidenceAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     if (evidenceDelta === null) {
@@ -170,9 +211,6 @@ export default function TodayBriefing() {
   const openEvidence = useCallback(
     async (delta: DecisionDelta) => {
       setEvidenceDelta(delta);
-      // Always read from a ref-style snapshot of cache via setState below;
-      // a direct read of `evidenceCache` here would be stale for callbacks
-      // queued before the latest setState commits.
       if (evidenceCache[delta.id]) return;
 
       evidenceAbortRef.current?.abort();
@@ -205,7 +243,17 @@ export default function TodayBriefing() {
         const result = await applyChange(id);
         if (result?.status === "applied") {
           showToast("success", result.resultMessage);
-          setExpandedId((current) => (current === id ? null : current));
+          // If we accepted the currently-reviewed delta, advance to the
+          // next item in the queue if there is one, else exit Review.
+          if (reviewId === id) {
+            const idx = orderedQueue.findIndex((d) => d.id === id);
+            const next = orderedQueue.find((d, i) => i !== idx && d.id !== id);
+            if (next && idx >= 0 && idx + 1 < orderedQueue.length) {
+              setReviewId(orderedQueue[idx + 1]?.id ?? next.id, { replace: true });
+            } else {
+              exitReview();
+            }
+          }
         } else if (result?.status === "requires_refresh") {
           showToast("error", result.resultMessage);
           await refetch();
@@ -216,7 +264,7 @@ export default function TodayBriefing() {
         setApplyingId(null);
       }
     },
-    [applyChange, refetch, showToast],
+    [applyChange, exitReview, orderedQueue, refetch, reviewId, setReviewId, showToast],
   );
 
   const handleDelegate = useCallback(
@@ -259,50 +307,57 @@ export default function TodayBriefing() {
     [correct, correctionTarget, refetch, showToast],
   );
 
+  const whatChanged = useMemo(
+    () => (data ? deriveWhatChanged(orderedQueue) : []),
+    [data, orderedQueue],
+  );
+
   return (
     <>
       <AppShell
-        sidebar={<Sidebar activeRoute="today" />}
+        sidebarMode={reviewMode ? "collapsed" : "expanded"}
+        sidebar={
+          <Sidebar
+            activeRoute="today"
+            mode={reviewMode ? "collapsed" : "expanded"}
+          />
+        }
         main={
-          <div className="tdv2-page" data-testid="today-page">
+          <div
+            className={`tdv2-page tdv2-page--${reviewMode ? "review" : "briefing"}`}
+            data-testid="today-page"
+            data-mode={reviewMode ? "review" : "briefing"}
+          >
             {loading && !data ? (
               <LoadingSkeleton />
             ) : error ? (
               <ErrorState />
             ) : data ? (
-              <>
-                <BriefingHeader
-                  summary={data.summary}
-                  generatedAt={data.generatedAt}
+              reviewMode && selectedDelta ? (
+                <ReviewModeBody
+                  selected={selectedDelta}
+                  queue={orderedQueue}
+                  handled={data.handledWithoutYou}
+                  applyingId={applyingId}
+                  positionOf={positionOf}
+                  onSelect={(id) => setReviewId(id)}
+                  onCollapse={exitReview}
+                  onAccept={handleAccept}
+                  onDelegate={(d) => setDelegateTarget(d)}
+                  onCorrect={(d) => setCorrectionTarget(d)}
+                  onOpenEvidence={(d) => void openEvidence(d)}
                 />
-                {orderedQueue.length > 0 ? (
-                  <div className="tdv2-stream" data-testid="today-stream">
-                    {orderedQueue.map((d) =>
-                      d.id === expandedId ? (
-                        <FocusedReviewCard
-                          key={d.id}
-                          delta={d}
-                          applying={applyingId === d.id}
-                          position={positionOf(d.id)}
-                          onCollapse={() => handleCollapse(d.id)}
-                          onAccept={() => handleAccept(d.id)}
-                          onDelegate={() => setDelegateTarget(d)}
-                          onCorrect={() => setCorrectionTarget(d)}
-                          onOpenEvidence={() => void openEvidence(d)}
-                        />
-                      ) : (
-                        <CompactCard
-                          key={d.id}
-                          delta={d}
-                          onOpen={() => handleOpen(d.id)}
-                        />
-                      ),
-                    )}
-                  </div>
-                ) : (
-                  <AllClearState summary={data.handledWithoutYou} />
-                )}
-              </>
+              ) : (
+                <BriefingModeBody
+                  generatedAt={data.generatedAt}
+                  summary={data.summary}
+                  primary={data.primaryJudgment}
+                  others={data.otherChanges}
+                  handled={data.handledWithoutYou}
+                  whatChanged={whatChanged}
+                  onReview={enterReview}
+                />
+              )
             ) : null}
           </div>
         }
@@ -340,6 +395,111 @@ export default function TodayBriefing() {
     </>
   );
 }
+
+// ---------------------------------------------------------------------
+// Briefing Mode body — spec §4
+// ---------------------------------------------------------------------
+
+interface BriefingProps {
+  generatedAt: string;
+  summary: import("@/api/today-page-types").TodaySummary;
+  primary: DecisionDelta | null;
+  others: DecisionDelta[];
+  handled: HandledWithoutYouSummary;
+  whatChanged: import("@/components/today-v2/FyralisBrief").WhatChangedItem[];
+  onReview: (id: string) => void;
+}
+
+function BriefingModeBody({
+  generatedAt,
+  summary,
+  primary,
+  others,
+  handled,
+  whatChanged,
+  onReview,
+}: BriefingProps) {
+  const total = (primary ? 1 : 0) + others.length;
+  return (
+    <>
+      <BriefingHeader summary={summary} generatedAt={generatedAt} />
+      <FyralisBrief
+        synthesis={handled.reassuranceCopy}
+        whatChanged={whatChanged}
+        handled={handled}
+      />
+      {primary ? (
+        <PrimaryJudgmentPreview
+          delta={primary}
+          total={total}
+          onReview={() => onReview(primary.id)}
+        />
+      ) : null}
+      <OtherItemsList items={others} onReview={onReview} />
+      <HandledWithoutYou summary={handled} />
+      {!primary && others.length === 0 ? <AllClearState summary={handled} /> : null}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Review Mode body — spec §5–§11
+// ---------------------------------------------------------------------
+
+interface ReviewProps {
+  selected: DecisionDelta;
+  queue: DecisionDelta[];
+  handled: HandledWithoutYouSummary;
+  applyingId: string | null;
+  positionOf: (id: string) => { index: number; total: number } | null;
+  onSelect: (id: string) => void;
+  onCollapse: () => void;
+  onAccept: (id: string) => void;
+  onDelegate: (d: DecisionDelta) => void;
+  onCorrect: (d: DecisionDelta) => void;
+  onOpenEvidence: (d: DecisionDelta) => void;
+}
+
+function ReviewModeBody({
+  selected,
+  queue,
+  handled,
+  applyingId,
+  positionOf,
+  onSelect,
+  onCollapse,
+  onAccept,
+  onDelegate,
+  onCorrect,
+  onOpenEvidence,
+}: ReviewProps) {
+  return (
+    <div className="tdv2-review-mode" data-testid="review-mode">
+      <ReviewQueueRail
+        items={queue}
+        selectedId={selected.id}
+        handled={handled}
+        onSelect={onSelect}
+      />
+      <div className="tdv2-review-mode__sheet-wrap">
+        <FocusedReviewCard
+          delta={selected}
+          applying={applyingId === selected.id}
+          position={positionOf(selected.id)}
+          onCollapse={onCollapse}
+          onAccept={() => onAccept(selected.id)}
+          onDelegate={() => onDelegate(selected)}
+          onCorrect={() => onCorrect(selected)}
+          onOpenEvidence={() => onOpenEvidence(selected)}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Misc states
+// ---------------------------------------------------------------------
 
 function LoadingSkeleton() {
   return (
