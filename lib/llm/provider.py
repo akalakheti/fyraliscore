@@ -1043,12 +1043,22 @@ class DeepSeekProvider(OpenAIProvider):
             last_error = err
             repair_note = str(err)
             if attempt == self.config.max_retries:
-                raise LLMParseError(
-                    f"DeepSeek strict-mode output did not validate after "
-                    f"{self.config.max_retries + 1} attempts: {err}",
-                    last_raw=raw[:1000],
-                    schema=schema.__name__,
-                ) from err
+                # Strict function-calling is usually tighter, but live
+                # DeepSeek-chat can still return syntactically malformed
+                # tool arguments after repair. Use ordinary JSON mode as
+                # a rescue path before failing the whole reasoning run.
+                fallback_user = (
+                    f"{base_user}\n\nPrior strict tool-call output failed "
+                    f"validation. Return ordinary JSON matching the schema. "
+                    f"Validation error: {err}."
+                )
+                return await super()._structured_raw(
+                    system=system,
+                    user=fallback_user,
+                    schema=schema,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
 
         raise LLMParseError(
             f"DeepSeek strict-mode exhausted retries: {last_error}"

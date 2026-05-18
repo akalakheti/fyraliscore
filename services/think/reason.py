@@ -46,7 +46,12 @@ from services.retrieval.primary import (
     TriggerContext,
     primary_retrieve,
 )
-from services.retrieval.second_pass import second_pass_expand
+from services.retrieval.config import CONFIG as RETRIEVAL_CONFIG
+from services.retrieval.second_pass import (
+    log_second_pass_decision,
+    second_pass_expand,
+    should_run_second_pass,
+)
 
 from .anomaly_integration import (
     Anomaly,
@@ -450,6 +455,56 @@ async def _run_once(
     # --- 1. Retrieval ---------------------------------------------
     t0 = time.monotonic()
     first = await primary_retrieve(trigger, conn, embedder=embedder)
+    try:
+        second_pass_decision = should_run_second_pass(
+            first,
+            trigger,
+            sparse_threshold=RETRIEVAL_CONFIG.second_pass_sparse_threshold,
+            bridge_confidence_threshold=(
+                RETRIEVAL_CONFIG.second_pass_bridge_confidence_threshold
+            ),
+            t2_has_authoritative_handler=(
+                trigger.kind == "T2" and is_authoritative(trigger)
+            ),
+        )
+        log_second_pass_decision(
+            second_pass_decision,
+            trigger=trigger,
+            tenant_id=trigger.tenant_id,
+        )
+        first.notes["second_pass_decision"] = {
+            "run": second_pass_decision.run,
+            "trigger_condition": second_pass_decision.trigger_condition,
+            "suggested_dimensions": list(
+                second_pass_decision.suggested_dimensions
+            ),
+            "reason_detail": dict(second_pass_decision.reason_detail),
+        }
+        if second_pass_decision.run:
+            first = await second_pass_expand(
+                first,
+                second_pass_decision.suggested_dimensions,
+                conn,
+            )
+            first.notes["second_pass_decision"] = {
+                "run": second_pass_decision.run,
+                "trigger_condition": second_pass_decision.trigger_condition,
+                "suggested_dimensions": list(
+                    second_pass_decision.suggested_dimensions
+                ),
+                "reason_detail": dict(second_pass_decision.reason_detail),
+            }
+    except Exception as e:  # noqa: BLE001
+        first.notes["second_pass_error"] = {
+            "type": type(e).__name__,
+            "message": str(e),
+        }
+        _log.warning(
+            "think.second_pass_failed",
+            tenant_id=str(trigger.tenant_id),
+            trigger_kind=trigger.kind,
+            error=str(e),
+        )
     emit("think.retrieval_done",
          run_id=str(record.id),
          models=len(first.models),
