@@ -170,6 +170,9 @@ async def tenant_cleanup(fresh_db: asyncpg.Pool, tenant: uuid.UUID):
             "DELETE FROM think_anomalies_raw WHERE tenant_id = $1", tenant,
         )
         await conn.execute(
+            "DELETE FROM think_run_costs WHERE tenant_id = $1", tenant,
+        )
+        await conn.execute(
             "DELETE FROM pending_post_commit_actions WHERE tenant_id = $1", tenant,
         )
         await conn.execute(

@@ -96,7 +96,7 @@ Proposition schemas (`proposition` field MUST match one of these exactly based o
 - concern               → {"kind": "concern", "about": "<subject>", "nature": "<what is concerning>", "raised_by": "<actor or role>"}
 - market_assessment     → {"kind": "market_assessment", "subject_external": "<external entity>", "assessment": "<...>"}
 - environmental_trend   → {"kind": "environmental_trend", "signature": "<...>", "direction": "<up|down|mixed>", "strength": "<weak|moderate|strong>"}
-- recommendation        → {"kind": "recommendation", "target_act_ref": {"type": "goal|commitment|decision|resource", "id": "<uuid>"} | null (null when no specific existing Act is referenced), "proposed_change": {"operation": "create|update|archive|transition", "payload": {...}}, "expected_impact": <number or null>, "qualitative_impact": "<string or null — at least one of expected_impact / qualitative_impact MUST be set>", "target_actor_id": "<uuid of the actor expected to decide, typically the CEO>" | null (null when no CEO UUID is in context)}
+- recommendation        → {"kind": "recommendation", "target_act_ref": {"type": "goal|commitment|decision|resource", "id": "<uuid or null for create>"} | null, "proposed_change": {"operation": "create|update|archive|transition", "payload": {...}}, "expected_impact": <number or null>, "qualitative_impact": "<string or null — at least one of expected_impact / qualitative_impact MUST be set>", "target_actor_id": "<uuid of the actor expected to decide, typically the CEO>" | null (null when no CEO UUID is in context)}
 
 The eleven kinds above are the ONLY valid `kind` values. Do NOT use "risk", "opportunity", or others — map them to the closest valid kind (concern, prediction, etc.).
 

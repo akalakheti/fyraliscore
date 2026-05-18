@@ -277,7 +277,8 @@ export default function TodayBriefing() {
   return (
     <>
       <AppShell
-        sidebar={<Sidebar activeRoute="today" />}
+        sidebarMode="collapsed"
+        sidebar={<Sidebar activeRoute="today" mode="collapsed" />}
         main={
           <div className="tdv2-page" data-testid="today-page">
             {loading && !data ? (

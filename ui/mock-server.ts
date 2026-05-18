@@ -217,6 +217,57 @@ export function mockBackend(): Plugin {
         const url = req.url ?? "";
         const method = req.method ?? "GET";
 
+        // ---- Demo session bootstrap ------------------------------
+        // AutoDemoSession boots by POSTing /v1/demo/sessions/start.
+        // The mock backend serves a stable Pelago session so the four
+        // primary surfaces (Today, Model, Forecasts, Ledger) all
+        // render against the same fixtures without a real gateway.
+        if (method === "GET" && url.startsWith("/api/v1/demo/companies")) {
+          json(res, {
+            items: [
+              {
+                company_id: "pelago",
+                name: "Pelago",
+                tagline: "Hospitality CRM, mid-market",
+                description: "Pelago demo tenant for Fyralis.",
+              },
+            ],
+          });
+          return;
+        }
+        if (method === "POST" && url.startsWith("/api/v1/demo/sessions/start")) {
+          await readJson(req); // body is { company_id }
+          json(res, {
+            session_id: "sess-pelago-mock",
+            tenant_id: "tenant-fyralis-demo",
+            auth_token: "mock-token-pelago",
+            auth_token_expires_at: "2099-01-01T00:00:00Z",
+            ceo_actor_id: "actor-rachin",
+            company_id: "pelago",
+          });
+          return;
+        }
+        const demoSessionDetail = url.match(/^\/api\/v1\/demo\/sessions\/([^/?]+)(?:\?.*)?$/);
+        if (method === "GET" && demoSessionDetail) {
+          json(res, {
+            session_id: demoSessionDetail[1],
+            tenant_id: "tenant-fyralis-demo",
+            company_id: "pelago",
+            total_cost_usd: 0,
+            cost_cap_usd: 100,
+            signals_injected: 0,
+            ended_at: null,
+          });
+          return;
+        }
+        const demoSessionAction = url.match(
+          /^\/api\/v1\/demo\/sessions\/([^/]+)\/(end|reset)(?:\?.*)?$/,
+        );
+        if (method === "POST" && demoSessionAction) {
+          json(res, { [demoSessionAction[2] === "end" ? "ended" : "reset"]: true });
+          return;
+        }
+
         // ---- Wave 2: Decision Deltas (Today v2) ------------------
         if (method === "GET" && /^\/api\/v1\/decision_deltas\/?(\?|$)/.test(url)) {
           const { mockListDeltas } = await import("./src/api/decision-deltas-mock");

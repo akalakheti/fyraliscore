@@ -48,6 +48,7 @@ const DEFAULT_SUGGESTIONS: AskSuggestion[] = [
   { key: "what_if_wait", label: "What if I wait?" },
   { key: "who_owns", label: "Who should own this?" },
   { key: "evidence_weakest", label: "What evidence is weakest?" },
+  { key: "what_if_escalate", label: "What happens if we escalate?" },
 ];
 
 export function getSuggestedPrompts(_delta: DecisionDelta): AskSuggestion[] {

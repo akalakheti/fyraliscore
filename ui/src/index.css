@@ -9615,6 +9615,17 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
   flex-direction: column;
 }
 
+/* Collapsed (icon rail) variant: the flex item stays 64px so the page
+ * keeps its reading width; the inner .fy-sidebar lays out at that
+ * width and expands to 240px on hover as a floating overlay (CSS in
+ * the .fy-sidebar--collapsed rules below).
+ */
+.fy-shell__sidebar--collapsed {
+  flex: 0 0 64px;
+  width: 64px;
+  z-index: 35;
+}
+
 .fy-shell__main {
   flex: 1 1 auto;
   min-width: 0;
@@ -9896,12 +9907,14 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
  * never reflowing the layout. */
 
 .fy-sidebar--collapsed {
-  width: 72px;
+  width: 64px;
   padding: var(--space-5) var(--space-2);
-  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    padding 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms ease;
   z-index: 35;
   /* When hover-expanded, this becomes an overlay; the outer flex item
-   * keeps its 72px so the page doesn't shift. */
+   * keeps its 64px so the page doesn't shift. */
   position: absolute;
   inset: 0 auto 0 0;
   height: 100vh;
@@ -9949,7 +9962,7 @@ body[data-sidebar-collapsed="true"] .cockpit-3col {
  *   --sidebar-hover-delay: 180ms; --sidebar-collapse-delay: 300ms */
 .fy-shell__sidebar--collapsed:hover .fy-sidebar--collapsed,
 .fy-shell__sidebar--collapsed:focus-within .fy-sidebar--collapsed {
-  width: 260px;
+  width: 240px;
   padding: var(--space-5) var(--space-4);
   transition-delay: 180ms;
   box-shadow: 12px 0 32px rgba(7, 23, 19, 0.25);

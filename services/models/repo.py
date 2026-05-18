@@ -73,6 +73,7 @@ from typing import Any, Sequence
 from uuid import UUID
 
 import asyncpg
+import structlog
 from pgvector.asyncpg import register_vector
 
 from lib.embeddings.ollama import (
@@ -120,6 +121,7 @@ class ModelsRepoError(CompanyOSError):
 _CONFIDENCE_MIN = 0.05
 _CONFIDENCE_MAX = 0.95
 _FALSIFIER_REQUIRED_ABOVE = 0.7
+_log = structlog.get_logger(__name__)
 
 
 # Columns written on INSERT. `proposition_kind` is GENERATED and
@@ -832,10 +834,17 @@ async def _maybe_auto_accept(
             notes="auto-accepted: low-risk create-commitment",
             conn=conn,
         )
-    except Exception:
+    except Exception as exc:
         # Leave the recommendation active on any failure — Think log
         # surfaces the LLM payload, and the user can dismiss/accept
         # manually from Today.
+        _log.warning(
+            "models.recommendation_auto_accept_failed",
+            recommendation_id=str(hydrated.id),
+            tenant_id=str(hydrated.tenant_id),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         return
 
 
